@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ImportGroup Label="PropertySheets" />
+  <PropertyGroup Label="UserMacros">
+    <TCMALLOC_AGGRESSIVE_DECOMMIT>true</TCMALLOC_AGGRESSIVE_DECOMMIT>
+    <TCMALLOC_RELEASE_RATE>10</TCMALLOC_RELEASE_RATE>
+  </PropertyGroup>
+  <PropertyGroup>
+    <IncludePath>E:\cppPro\MsquicStorage-version\MsquicStorage\include\abseil-cpp;E:\cppPro\MsquicStorage-version\MsquicStorage\include\oneTbb;E:\cppPro\MsquicStorage-version\MsquicStorage\include\boost;E:\cppPro\MsquicStorage-version\MsquicStorage\include\msquic;$(IncludePath)</IncludePath>
+    <LibraryPath>E:\cppPro\MsquicStorage-version\MsquicStorage\lib\tcmalloc;E:\cppPro\MsquicStorage-version\MsquicStorage\lib\boost;E:\cppPro\MsquicStorage-version\MsquicStorage\lib\tbb;E:\cppPro\MsquicStorage-version\MsquicStorage\lib\abseil-cpp;E:\cppPro\MsquicStorage-version\MsquicStorage\lib\msquic;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <Link>
+      <AdditionalDependencies>msquic.lib;libtcmalloc_minimal.lib;tbb12.lib;absl_graphcycles_internal.lib;absl_kernel_timeout_internal.lib;absl_synchronization.lib;absl_spinlock_wait.lib;absl_strerror.lib;absl_throw_delegate.lib;absl_tracing_internal.lib;absl_base.lib;absl_log_severity.lib;absl_malloc_internal.lib;absl_poison.lib;absl_raw_logging_internal.lib;absl_scoped_set_env.lib;absl_hashtablez_sampler.lib;absl_raw_hash_set.lib;absl_civil_time.lib;absl_time.lib;absl_time_zone.lib;absl_city.lib;absl_hash.lib;absl_stacktrace.lib;absl_symbolize.lib;absl_utf8_for_code_point.lib;absl_borrowed_fixup_buffer.lib;absl_debugging_internal.lib;absl_decode_rust_punycode.lib;absl_demangle_internal.lib;absl_demangle_rust.lib;absl_examine_stack.lib;absl_failure_signal_handler.lib;absl_leak_check.lib;absl_int128.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <ForceSymbolReferences>_tcmalloc</ForceSymbolReferences>
+    </Link>
+    <ClCompile>
+      <Optimization>Full</Optimization>
+    </ClCompile>
+    <ClCompile>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+    </ClCompile>
+    <ClCompile>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+    </ClCompile>
+    <ClCompile>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+    </ClCompile>
+    <ClCompile>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <BuildMacro Include="TCMALLOC_AGGRESSIVE_DECOMMIT">
+      <Value>$(TCMALLOC_AGGRESSIVE_DECOMMIT)</Value>
+      <EnvironmentVariable>true</EnvironmentVariable>
+    </BuildMacro>
+    <BuildMacro Include="TCMALLOC_RELEASE_RATE">
+      <Value>$(TCMALLOC_RELEASE_RATE)</Value>
+      <EnvironmentVariable>true</EnvironmentVariable>
+    </BuildMacro>
+  </ItemGroup>
+</Project>
