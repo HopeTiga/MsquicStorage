@@ -196,8 +196,6 @@ namespace hope {
                 return nullptr;
             }
 
-  
-
             return stream;
 
 		}
