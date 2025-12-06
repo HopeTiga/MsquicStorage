@@ -249,28 +249,10 @@ namespace hope {
             void* context,
             QUIC_STREAM_EVENT* event) {
 
-            static const char* eventNames[] = {
-                "QUIC_STREAM_EVENT_START_COMPLETE",            // 0
-                "QUIC_STREAM_EVENT_RECEIVE",                   // 1
-                "QUIC_STREAM_EVENT_SEND_COMPLETE",            // 2
-                "QUIC_STREAM_EVENT_PEER_SEND_SHUTDOWN",       // 3
-                "QUIC_STREAM_EVENT_PEER_SEND_ABORTED",        // 4
-                "QUIC_STREAM_EVENT_PEER_RECEIVE_ABORTED",     // 5
-                "QUIC_STREAM_EVENT_SEND_SHUTDOWN_COMPLETE",   // 6
-                "QUIC_STREAM_EVENT_SHUTDOWN_COMPLETE",        // 7
-                "QUIC_STREAM_EVENT_IDEAL_SEND_BUFFER_SIZE",   // 8
-                "QUIC_STREAM_EVENT_PEER_ACCEPTED",            // 9
-                "QUIC_STREAM_EVENT_CANCEL_ON_LOSS"           // 10
-            };
+            MsquicSocket * msquicSocket = static_cast<MsquicSocket*>(context);
 
-            auto msquicSocket = static_cast<MsquicSocket*>(context);
             if (msquicSocket == nullptr || event == nullptr) {
                 return QUIC_STATUS_INVALID_PARAMETER;
-            }
-
-            if (event->Type < sizeof(eventNames) / sizeof(eventNames[0])) {
-
-
             }
 
             switch (event->Type) {
