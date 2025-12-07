@@ -39,19 +39,13 @@ namespace hope {
             void disconnect();
 
             // 设置消息处理函数
-            void setMessageHandle(std::function<void(boost::json::object&)> handle);
+            void setOnDataReceivedHandle(std::function<void(boost::json::object&)> handle);
 
             // 设置连接状态处理函数
-            void setConnectionHandle(std::function<void(bool)> handle);
+            void setOnConnectionHandle(std::function<void(bool)> handle);
 
             // 是否已连接
             bool isConnected() const;
-
-            // 获取账户ID
-            std::string getAccountId() const;
-
-            // 设置账户ID
-            void setAccountId(const std::string& accountId);
 
         private:
             // 创建流
@@ -67,25 +61,36 @@ namespace hope {
             void clear();
 
         private:
+
             boost::asio::io_context& ioContext;
+
             HQUIC connection;
+
             HQUIC stream;
+
             HQUIC remoteStream;
+
             MsQuicRegistration* registration;
+
             MsQuicConfiguration* configuration;
 
             std::string serverAddress;
+
             uint16_t serverPort;
+
             std::string alpn;
 
             std::vector<uint8_t> receivedBuffer;
+
             int64_t payloadLen;
 
             std::string accountId;
+
             std::atomic<bool> connected;
 
-            std::function<void(boost::json::object&)> messageHandle;
-            std::function<void(bool)> connectionHandle;
+            std::function<void(boost::json::object&)> onDataReceivedHandle;
+
+            std::function<void(bool)> onConnectionHandle;
         };
 
         // 声明静态回调函数
