@@ -112,7 +112,7 @@ namespace hope {
 
             }
             else {
-                LOG_ERROR("Unknown WebRTC Request Type: %d", type);
+                LOG_ERROR("Unknown Msquic Request Type: %d", type);
             }
         }
 
@@ -165,7 +165,7 @@ namespace hope {
 
                                         boost::json::object forwardMessage = message;
                                         forwardMessage["state"] = 200;
-                                        forwardMessage["message"] = "WebRTCSignalServer forward";
+                                        forwardMessage["message"] = "MsquicStorage forward";
 
                                         // 修改这里：构建二进制消息
                                         auto [buffer, size] = buildMessage(forwardMessage);
@@ -214,7 +214,7 @@ namespace hope {
 
                                 boost::json::object forwardMessage = message;
                                 forwardMessage["state"] = 200;
-                                forwardMessage["message"] = "WebRTCSignalServer forward";
+                                forwardMessage["message"] = "MsquicStorage forward";
 
                                 // 修改这里：构建二进制消息
                                 auto [buffer, size] = buildMessage(forwardMessage);
@@ -240,7 +240,7 @@ namespace hope {
 
                                                 boost::json::object forwardMessage = message;
                                                 forwardMessage["state"] = 200;
-                                                forwardMessage["message"] = "WebRTCSignalServer forward";
+                                                forwardMessage["message"] = "MsquicStorage forward";
 
                                                 // 修改这里：构建二进制消息
                                                 auto [buffer, size] = buildMessage(forwardMessage);
@@ -287,7 +287,7 @@ namespace hope {
                 // 3. 转发消息
                 boost::json::object forwardMessage = message;
                 forwardMessage["state"] = 200;
-                forwardMessage["message"] = "WebRTCSignalServer forward";
+                forwardMessage["message"] = "MsquicStorage forward";
 
                 // 修改这里：构建二进制消息
                 auto [buffer, size] = buildMessage(forwardMessage);
