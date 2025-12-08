@@ -44,7 +44,7 @@ namespace hope {
 
                         Logger::getInstance()->info("MySQL connection established successfully");
 
-                        self->startHeartbeat(std::chrono::seconds(30));
+                        self->startHeartbeat(std::chrono::seconds(300));
                     }
                     catch (const std::exception& e) {
                         self->isConnected = false;
