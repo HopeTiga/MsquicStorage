@@ -363,7 +363,6 @@ namespace hope {
                 configuration = nullptr;
             }
 
-
         }
 
         // 静态连接回调函数

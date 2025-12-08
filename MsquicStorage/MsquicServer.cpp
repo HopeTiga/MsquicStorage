@@ -50,7 +50,6 @@ namespace hope {
                 configuration = nullptr;
             }
             if (registration != nullptr) {
-                delete registration;
                 registration = nullptr;
             }
             initialized = false;
@@ -295,7 +294,9 @@ namespace hope {
             case QUIC_CONNECTION_EVENT_SHUTDOWN_COMPLETE:
             {
                 if (msquicSocket) {
-                
+
+                    msquicSocket->shutDown();
+
                     boost::asio::co_spawn(msquicSocket->getIoCompletionPorts(), [=]()mutable->boost::asio::awaitable<void> {
                         
                         msquicSocket->getMsquicManager()->removeConnection(msquicSocket->getAccountId());
@@ -303,6 +304,8 @@ namespace hope {
                         delete msquicSocket;
 
                         msquicSocket = nullptr;
+
+                        co_return;
 
                         }, boost::asio::detached);
 
