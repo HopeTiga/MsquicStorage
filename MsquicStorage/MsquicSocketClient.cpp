@@ -243,6 +243,8 @@ namespace hope {
                     QUIC_CONNECTION_SHUTDOWN_FLAG_NONE,
                     QUIC_STATUS_SUCCESS
                     );
+                MsQuic->ConnectionClose(connection);
+                connection = nullptr;
 
             }
         }
@@ -317,6 +319,12 @@ namespace hope {
 
             receivedBuffer.clear();
 
+            if (registration) {
+                registration->Shutdown(QUIC_CONNECTION_SHUTDOWN_FLAG_NONE, 0);
+                //delete registration;
+                registration = nullptr;
+            }
+
             // 清理流
             if (stream) {
                 // 使用中止标志立即关闭
@@ -346,8 +354,6 @@ namespace hope {
                     QUIC_STATUS_ABORTED
                     );
 
-                // 强制关闭
-                MsQuic->ConnectionClose(connection);
                 connection = nullptr;
             }
 
@@ -357,10 +363,7 @@ namespace hope {
                 configuration = nullptr;
             }
 
-            if (registration) {
-                delete registration;
-                registration = nullptr;
-            }
+
         }
 
         // 静态连接回调函数
