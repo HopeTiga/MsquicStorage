@@ -83,7 +83,7 @@ namespace hope {
             }
 
             // Create registration
-            registration = new MsQuicRegistration("MsquicServer");
+            registration = new MsQuicRegistration("MsquicStorage");
             if (!registration->IsValid()) {
                 LOG_ERROR("initialize failed: registration invalid");
                 delete registration;
@@ -98,9 +98,9 @@ namespace hope {
             settings.SetPeerBidiStreamCount(2);
 
             // 正确获取字符串
-            std::string certFileStr = ConfigManager::Instance().GetString("MsquicServer.certificateFile");
+            std::string certFileStr = ConfigManager::Instance().GetString("MsquicStorage.certificateFile");
 
-            std::string privateKeyStr = ConfigManager::Instance().GetString("MsquicServer.privateKeyFile");
+            std::string privateKeyStr = ConfigManager::Instance().GetString("MsquicStorage.privateKeyFile");
 
             QUIC_CERTIFICATE_FILE certFile = {};
 
@@ -296,11 +296,15 @@ namespace hope {
             {
                 if (msquicSocket) {
                 
-                    msquicSocket->getMsquicManager()->removeConnection(msquicSocket->getAccountId());
+                    boost::asio::co_spawn(msquicSocket->getIoCompletionPorts(), [=]()mutable->boost::asio::awaitable<void> {
+                        
+                        msquicSocket->getMsquicManager()->removeConnection(msquicSocket->getAccountId());
 
-                    delete msquicSocket;
+                        delete msquicSocket;
 
-                    msquicSocket = nullptr;
+                        msquicSocket = nullptr;
+
+                        }, boost::asio::detached);
 
                 }
      

@@ -37,6 +37,8 @@ namespace hope {
 
 			void setRemoteStream(HQUIC remoteStream);
 
+			boost::asio::io_context& getIoCompletionPorts();
+
 		private:
 
 			HQUIC createStream();

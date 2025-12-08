@@ -240,6 +240,11 @@ namespace hope {
 
         }
 
+        boost::asio::io_context& MsquicSocket::getIoCompletionPorts()
+        {
+            return this->ioContext;
+        }
+
 
         // Stream callback
         QUIC_STATUS QUIC_API MsquicSocketHandle(
