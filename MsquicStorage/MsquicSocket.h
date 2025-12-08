@@ -39,6 +39,8 @@ namespace hope {
 
 			boost::asio::io_context& getIoCompletionPorts();
 
+			void shutDown();
+
 		private:
 
 			HQUIC createStream();
@@ -76,6 +78,8 @@ namespace hope {
 			boost::asio::steady_timer registrationTimer; // 计时器成员
 
 			std::atomic<bool> isRegistered{ false }; // 新增：注册状态标志
+
+			std::atomic<bool> isShutDown{ false };
 
 		};
 
