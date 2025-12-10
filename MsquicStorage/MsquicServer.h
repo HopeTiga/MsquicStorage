@@ -32,13 +32,13 @@ namespace hope {
 
 			MsQuicConfiguration* getConfiguration();
 
-			void postTaskAsync(size_t channelIndex, std::function <boost::asio::awaitable<void>(MsquicManager*) > asyncHandle);
+			void postTaskAsync(size_t channelIndex, std::function <boost::asio::awaitable<void>(std::shared_ptr<MsquicManager>) > asyncHandle);
 
 			void shutDown();
 
 		private:
 
-			MsquicManager * loadBalanceMsquicManger();
+			std::shared_ptr<MsquicManager> loadBalanceMsquicManger();
 
 		private:
 
@@ -59,7 +59,7 @@ namespace hope {
 			// 初始化标志
 			bool initialized;
 
-			std::vector<MsquicManager*> msquicManagers;
+			std::vector<std::shared_ptr<MsquicManager>> msquicManagers;
 
 			std::atomic<size_t> loadBalancer{ 0 };
 

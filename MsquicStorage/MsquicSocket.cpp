@@ -78,9 +78,9 @@ namespace hope {
         {
            stream = createStream();
 
-           boost::asio::co_spawn(ioContext, [this]()->boost::asio::awaitable<void> {
+           boost::asio::co_spawn(ioContext, [self = shared_from_this()]()->boost::asio::awaitable<void> {
             
-                co_await this->registrationTimeout();
+                co_await self->registrationTimeout();
 
             }, boost::asio::detached);
         }
@@ -160,7 +160,7 @@ namespace hope {
                     boost::json::parse(std::string(payload.begin(), payload.end())).as_object();
 
                 auto msquicData = std::make_shared<MsquicData>(
-                    json, this, msquicManager);
+                    json, shared_from_this(), msquicManager);
                 msquicManager->getMsquicLogicSystem()->postTaskAsync(std::move(msquicData));
             }
         }

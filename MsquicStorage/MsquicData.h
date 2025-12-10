@@ -13,9 +13,9 @@ namespace hope {
 
 		public:
 
-			MsquicData(boost::json::object json, MsquicSocket * msquicSocket, MsquicManager* msquicManager);
+			MsquicData(boost::json::object json, std::shared_ptr<MsquicSocket> msquicSocket, MsquicManager* msquicManager);
 
-			MsquicSocket * msquicSocket;
+			std::shared_ptr<MsquicSocket> msquicSocket;
 
 			boost::json::object json;
 

@@ -133,7 +133,7 @@ namespace hope {
 
                 std::string accountId = message["accountId"].as_string().c_str();
                 std::string targetId = message["targetId"].as_string().c_str();
-                hope::quic::MsquicSocket* targetSocket = nullptr;
+                std::shared_ptr<hope::quic::MsquicSocket> targetSocket = nullptr;
 
                 // 1. 查找目标连接
                 {
@@ -151,12 +151,12 @@ namespace hope {
                     if (handles.value() == -1) {
                         int mapChannelIndex = data->msquicManager->hasher(targetId) % data->msquicManager->hashSize;
 
-                        data->msquicManager->msquicServer->postTaskAsync(mapChannelIndex, [=](hope::quic::MsquicManager * manager) ->boost::asio::awaitable<void> {
+                        data->msquicManager->msquicServer->postTaskAsync(mapChannelIndex, [=](std::shared_ptr<hope::quic::MsquicManager> manager) ->boost::asio::awaitable<void> {
 
                             if (manager->actorSocketMappingIndex.find(targetId) != manager->actorSocketMappingIndex.end()) {
                                 int targetChannelIndex = manager->actorSocketMappingIndex[targetId];
 
-                                self->msquicServer->postTaskAsync(targetChannelIndex, [=](hope::quic::MsquicManager* manager)->boost::asio::awaitable<void> {
+                                self->msquicServer->postTaskAsync(targetChannelIndex, [=](std::shared_ptr<hope::quic::MsquicManager> manager)->boost::asio::awaitable<void> {
 
                                     if (manager->msquicSocketMap.find(targetId) != manager->msquicSocketMap.end()) {
                                         if (tbb::concurrent_lru_cache<std::string, int>::handle handles = self->localRouteCache[targetId]) {
@@ -205,7 +205,7 @@ namespace hope {
                             });
                     }
                     else {
-                        data->msquicManager->msquicServer->postTaskAsync(handles.value(), [=](hope::quic::MsquicManager* manager)->boost::asio::awaitable<void> {
+                        data->msquicManager->msquicServer->postTaskAsync(handles.value(), [=](std::shared_ptr<hope::quic::MsquicManager> manager)->boost::asio::awaitable<void> {
 
                             if (manager->msquicSocketMap.find(targetId) != manager->msquicSocketMap.end()) {
                                 if (tbb::concurrent_lru_cache<std::string, int>::handle handles = self->localRouteCache[targetId]) {
@@ -226,12 +226,12 @@ namespace hope {
                             else {
                                 int mapChannelIndex = data->msquicManager->hasher(targetId) % data->msquicManager->hashSize;
 
-                                data->msquicManager->msquicServer->postTaskAsync(mapChannelIndex, [=](hope::quic::MsquicManager* manager)->boost::asio::awaitable<void> {
+                                data->msquicManager->msquicServer->postTaskAsync(mapChannelIndex, [=](std::shared_ptr<hope::quic::MsquicManager> manager)->boost::asio::awaitable<void> {
 
                                     if (manager->actorSocketMappingIndex.find(targetId) != manager->actorSocketMappingIndex.end()) {
                                         int targetChannelIndex = manager->actorSocketMappingIndex[targetId];
 
-                                        self->msquicServer->postTaskAsync(targetChannelIndex, [=](hope::quic::MsquicManager* manager) ->boost::asio::awaitable<void> {
+                                        self->msquicServer->postTaskAsync(targetChannelIndex, [=](std::shared_ptr<hope::quic::MsquicManager> manager) ->boost::asio::awaitable<void> {
 
                                             if (manager->msquicSocketMap.find(targetId) != manager->msquicSocketMap.end()) {
                                                 if (tbb::concurrent_lru_cache<std::string, int>::handle handles = self->localRouteCache[targetId]) {
@@ -329,7 +329,7 @@ namespace hope {
 
                 int mapChannelIndex = data->msquicManager->hasher(accountId) % data->msquicManager->hashSize;
 
-                data->msquicManager->msquicServer->postTaskAsync(mapChannelIndex, [self = data->msquicManager, accountId, mapChannelIndex](hope::quic::MsquicManager* manager)->boost::asio::awaitable<void> {
+                data->msquicManager->msquicServer->postTaskAsync(mapChannelIndex, [self = data->msquicManager, accountId, mapChannelIndex](std::shared_ptr<hope::quic::MsquicManager> manager)->boost::asio::awaitable<void> {
                     manager->actorSocketMappingIndex[accountId] = self->channelIndex;
                     co_return;
                     });

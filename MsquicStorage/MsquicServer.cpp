@@ -29,7 +29,7 @@ namespace hope {
             for (int i = 0; i < size; i++) {
                 std::pair<size_t, boost::asio::io_context&> pairs =
                     hope::iocp::AsioProactors::getInstance()->getIoCompletePorts();
-                msquicManagers[i] = new MsquicManager(pairs.first, pairs.second, this);
+                msquicManagers[i] = std::make_shared<MsquicManager>(pairs.first, pairs.second, this);
             }
         }
 
@@ -53,16 +53,6 @@ namespace hope {
                 registration = nullptr;
             }
             initialized = false;
-
-            for (int i = 0; i < msquicManagers.size(); i++) {
-            
-                if (msquicManagers[i]) {
-
-                    delete msquicManagers[i];
-
-                }
-
-            }
 
             msquicManagers.clear();
         }
@@ -180,14 +170,14 @@ namespace hope {
             return configuration;
         }
 
-        MsquicManager* MsquicServer::loadBalanceMsquicManger()
+        std::shared_ptr<MsquicManager> MsquicServer::loadBalanceMsquicManger()
         {
             size_t index = loadBalancer.fetch_add(1) % size;
             return msquicManagers[index];
         }
 
         void MsquicServer::postTaskAsync(size_t channelIndex,
-            std::function<boost::asio::awaitable<void>(MsquicManager*)> asyncHandle)
+            std::function<boost::asio::awaitable<void>(std::shared_ptr<MsquicManager>)> asyncHandle)
         {
             if (channelIndex >= msquicManagers.size()) {
                 LOG_ERROR("Invalid channelIndex: %zu, size: %zu", channelIndex, msquicManagers.size());
@@ -201,8 +191,8 @@ namespace hope {
             }
 
             boost::asio::co_spawn(manager->getMsquicLogicSystem()->getIoCompletePorts(),
-                [manager, asyncHandle = std::move(asyncHandle)]() -> boost::asio::awaitable<void> {
-                    co_await asyncHandle(manager);
+                [sharedManager = manager->shared_from_this(), asyncHandle = std::move(asyncHandle)]() -> boost::asio::awaitable<void> {
+                    co_await asyncHandle(sharedManager);
                 }, [this](std::exception_ptr ptr) {
                     if (ptr) {
                         try {
@@ -252,10 +242,10 @@ namespace hope {
                     return QUIC_STATUS_ABORTED;
                 }
 
-                MsquicManager * msquicManager = server->loadBalanceMsquicManger();
+                std::shared_ptr<MsquicManager> msquicManager = server->loadBalanceMsquicManger();
 
-                MsquicSocket* msquicSocket = new MsquicSocket(event->NEW_CONNECTION.Connection,
-                    msquicManager,
+                std::shared_ptr<MsquicSocket> msquicSocket = std::make_shared<MsquicSocket>(event->NEW_CONNECTION.Connection,
+                    msquicManager.get(),
                     msquicManager->getMsquicLogicSystem()->getIoCompletePorts());
 
                 msquicSocket->runEventLoop();
@@ -263,7 +253,7 @@ namespace hope {
                 MsQuic->SetCallbackHandler(
                     event->NEW_CONNECTION.Connection,
                     MsquicConnectionHandle,
-                    msquicSocket);
+                    msquicSocket.get());
 
                 return status;
             }
@@ -300,10 +290,6 @@ namespace hope {
                     boost::asio::co_spawn(msquicSocket->getIoCompletionPorts(), [=]()mutable->boost::asio::awaitable<void> {
                         
                         msquicSocket->getMsquicManager()->removeConnection(msquicSocket->getAccountId());
-
-                        delete msquicSocket;
-
-                        msquicSocket = nullptr;
 
                         co_return;
 

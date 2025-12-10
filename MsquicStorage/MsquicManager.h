@@ -17,7 +17,7 @@ namespace hope {
 
 		class MsquicSocket;
 
-		class MsquicManager
+		class MsquicManager : public std::enable_shared_from_this<MsquicManager>
 		{
 			friend class hope::handle::MsquicLogicSystem;
 		public:
@@ -40,7 +40,7 @@ namespace hope {
 
 			std::shared_ptr<hope::handle::MsquicLogicSystem> logicSystem;
 
-			hope::utils::MsquicHashMap<std::string,MsquicSocket*> msquicSocketMap;
+			hope::utils::MsquicHashMap<std::string,std::shared_ptr<MsquicSocket>> msquicSocketMap;
 
 			size_t hashSize = std::thread::hardware_concurrency();
 

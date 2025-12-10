@@ -6,7 +6,7 @@
 namespace hope {
 	namespace quic {
 
-		MsquicData::MsquicData(boost::json::object json, MsquicSocket * msquicSocket, MsquicManager* msquicManager)
+		MsquicData::MsquicData(boost::json::object json, std::shared_ptr<MsquicSocket> msquicSocket, MsquicManager* msquicManager)
 			:json(json)
 			, msquicSocket(msquicSocket)
 			, msquicManager(msquicManager) {

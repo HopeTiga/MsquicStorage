@@ -57,7 +57,7 @@ namespace hope {
 
             LOG_INFO("Start Async Post Task: %d", mapChannelIndex);
 
-            msquicServer->postTaskAsync(mapChannelIndex, [self = this, accountId](hope::quic::MsquicManager * manager) -> boost::asio::awaitable<void> {
+            msquicServer->postTaskAsync(mapChannelIndex, [self = shared_from_this(), accountId](std::shared_ptr<MsquicManager> manager) -> boost::asio::awaitable<void> {
 
                 manager->actorSocketMappingIndex.erase(accountId);
 
