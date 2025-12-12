@@ -2,7 +2,7 @@
 #define QUIC_VERSION_2          0x6b3343cfU     // Second official version (host byte order)
 #define QUIC_VERSION_1          0x00000001U     // First official version (host byte order)
 
-#include "msquic.h"
+#include <msquic.h>
 
 #include "MsquicServer.h"
 #include "MsquicManager.h"
