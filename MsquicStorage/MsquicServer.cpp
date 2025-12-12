@@ -82,6 +82,9 @@ namespace hope {
 
         bool MsquicServer::initialize()
         {
+
+            if (initialize) return true;
+            
             // Check if MsQuicApi is valid
             if (MsQuic == nullptr) {
                 LOG_ERROR("initialize failed: MsQuic global pointer is null");
