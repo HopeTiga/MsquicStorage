@@ -1,6 +1,6 @@
 #include "MsquicSocketClient.h"
 #include "MsQuicApi.h"
-#include "Logger.h"
+#include "Utils.h"
 
 namespace hope {
     namespace quic {
@@ -60,7 +60,7 @@ namespace hope {
         bool MsquicSocketClient::connect(std::string serverAddress, uint64_t serverPort) {
             // 如果已有连接，先完全清理
             if (connection != nullptr) {
-                Logger::getInstance()->info("reclear msquic connection");
+                LOG_INFO("reclear msquic connection");
 
                 // 立即标记断开，防止新操作
                 connected.store(false);
@@ -108,7 +108,7 @@ namespace hope {
                 &connection);
 
             if (QUIC_FAILED(status)) {
-                Logger::getInstance()->error("ConnectionOpen failed: " + status);
+                LOG_ERROR("ConnectionOpen failed: 0x%08X", status);
                 return false;
             }
 
@@ -121,7 +121,7 @@ namespace hope {
                 serverPort);
 
             if (QUIC_FAILED(status)) {
-                Logger::getInstance()->error("ConnectionStart failed: " + status);
+                LOG_ERROR("ConnectionStart failed:0x%08X", status);
                 MsQuic->ConnectionClose(connection);
                 connection = nullptr;
                 return false;
@@ -130,7 +130,7 @@ namespace hope {
             // 创建流
             stream = createStream();
             if (stream == nullptr) {
-                Logger::getInstance()->error("create MsquicStream failed");
+                LOG_ERROR("create MsquicStream failed");
                 MsQuic->ConnectionClose(connection);
                 connection = nullptr;
                 return false;
@@ -308,7 +308,7 @@ namespace hope {
 
                 }
                 catch (const std::exception& e) {
-                    // 忽略解析失败的消息
+                    LOG_ERROR("hope::quic::MsquicSocketClient::tryParse Error: %s",e.what());
                 }
             }
         }
@@ -380,7 +380,7 @@ namespace hope {
                 break;
 
             case QUIC_CONNECTION_EVENT_SHUTDOWN_COMPLETE:
-                Logger::getInstance()->info("QUIC_CONNECTION_EVENT_SHUTDOWN_COMPLETE");
+                LOG_INFO("QUIC_CONNECTION_EVENT_SHUTDOWN_COMPLETE");
 
                 client->connected.store(false);
                 if (client->onConnectionHandle) {
