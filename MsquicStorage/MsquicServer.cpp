@@ -2,6 +2,8 @@
 #define QUIC_VERSION_2          0x6b3343cfU     // Second official version (host byte order)
 #define QUIC_VERSION_1          0x00000001U     // First official version (host byte order)
 
+#include "msquic.h"
+
 #include "MsquicServer.h"
 #include "MsquicManager.h"
 #include "MsquicSocket.h"
@@ -10,7 +12,6 @@
 #include "AsioProactors.h"
 #include "ConfigManager.h"
 
-#include "Logger.h"
 #include "Utils.h"
 
 namespace hope {
@@ -24,37 +25,59 @@ namespace hope {
         const MsQuicVersionSettings versionSettings(supportedVersions, 2);
 
         MsquicServer::MsquicServer(size_t port, std::string alpn, size_t size)
-            : port(port), alpn(alpn), size(size), msquicManagers(size) {
+            : port(port)
+            , alpn(alpn)
+            , size(size)
+            , msquicManagers(size)
+            , iocpThreads(size){
 
             for (int i = 0; i < size; i++) {
                 std::pair<size_t, boost::asio::io_context&> pairs =
                     hope::iocp::AsioProactors::getInstance()->getIoCompletePorts();
                 msquicManagers[i] = std::make_shared<MsquicManager>(pairs.first, pairs.second, this);
             }
+
         }
 
         MsquicServer::~MsquicServer()
         {
             shutDown();
+
         }
 
-        void MsquicServer::shutDown()
-        {
-            if (listener != nullptr) {
-                MsQuic->ListenerStop(listener);
-                MsQuic->ListenerClose(listener);
-                listener = nullptr;
-            }
-            if (configuration != nullptr) {
-                delete configuration;
-                configuration = nullptr;
-            }
-            if (registration != nullptr) {
-                registration = nullptr;
-            }
-            initialized = false;
+        bool MsquicServer::RunEventLoop() {
+        
+            // Create listener
+            QUIC_STATUS status = MsQuic->ListenerOpen(
+                *registration,
+                MsquicAcceptHandle,
+                this,
+                &listener);
 
-            msquicManagers.clear();
+            if (QUIC_FAILED(status)) {
+                LOG_ERROR("initialize failed: ListenerOpen status=0x%08X", status);
+                return false;
+            }
+
+            // Start listening
+            QUIC_ADDR addr = { 0 };
+            QuicAddrSetFamily(&addr, QUIC_ADDRESS_FAMILY_INET);
+            QuicAddrSetPort(&addr, port);
+
+            const QUIC_BUFFER alpnBufferList[] = {
+                { (uint32_t)alpn.length(), (uint8_t*)alpn.c_str() }
+            };
+
+            status = MsQuic->ListenerStart(listener, alpnBufferList, 1, &addr);
+
+            if (QUIC_FAILED(status)) {
+                LOG_ERROR("initialize failed: ListenerStart status=0x%08X", status);
+                return false;
+            }
+
+            LOG_INFO("MsquicServer Protocol: %s Accept Port: %d  initialize SUCCESS", alpn.c_str(), port);
+            return true;
+
         }
 
         bool MsquicServer::initialize()
@@ -69,6 +92,77 @@ namespace hope {
             if (QUIC_FAILED(initStatus)) {
                 LOG_ERROR("initialize failed: MsQuic init failed");
                 return false;
+            }
+
+            executions = new QUIC_EXECUTION * [size];
+
+            // 3. 确保 ioCompletionPorts 也是动态分配的，防止越界
+            ioCompletionPorts = new HANDLE[size];
+
+            configs = new QUIC_EXECUTION_CONFIG[size];
+
+            for (int i = 0; i < size; i++) {
+
+                HANDLE iocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
+
+                ioCompletionPorts[i] = iocp;
+
+                configs[i].IdealProcessor = i;
+
+                // 这里取数组中元素的地址，是安全的（只要 ioCompletionPorts 没被释放）
+                configs[i].EventQ = &ioCompletionPorts[i];
+            }
+
+            QUIC_STATUS status = MsQuic->ExecutionCreate(
+                QUIC_GLOBAL_EXECUTION_CONFIG_FLAG_HIGH_PRIORITY,
+                1000,
+                size,
+                configs,
+                executions 
+            );
+
+            if (QUIC_FAILED(status)) {
+
+                LOG_ERROR("Msquic->ExecutionCreate Error: 0x%08X", status);
+
+                return false;
+            }
+
+            iocpRunEvent.store(true);
+            
+            for (int i = 0; i < size; i++) {
+
+                iocpThreads.emplace_back(std::thread([this,i]() {
+                    
+                    while (iocpRunEvent.load()) {
+                    
+                        uint32_t WaitTime = MsQuic->ExecutionPoll(executions[i]);
+
+                        ULONG OverlappedCount = 0;
+
+                        OVERLAPPED_ENTRY Overlapped[8];
+
+                        if (GetQueuedCompletionStatusEx(ioCompletionPorts[i], Overlapped, ARRAYSIZE(Overlapped), &OverlappedCount, WaitTime, FALSE)) {
+
+                            for (ULONG i = 0; i < OverlappedCount; ++i) {
+
+                                if (Overlapped[i].lpOverlapped == NULL) {
+
+                                    continue;
+                                }
+
+                                QUIC_SQE* Sqe = CONTAINING_RECORD(Overlapped[i].lpOverlapped, QUIC_SQE, Overlapped);
+
+                                Sqe->Completion(&Overlapped[i]);
+
+                            }
+
+                        }
+
+                    }
+
+                    }));
+
             }
 
             // Create registration
@@ -125,39 +219,96 @@ namespace hope {
 
             // Set version
             configuration->SetVersionSettings(versionSettings);
+
             configuration->SetVersionNegotiationExtEnabled();
 
-            // Create listener
-            QUIC_STATUS status = MsQuic->ListenerOpen(
-                *registration,
-                MsquicAcceptHandle,
-                this,
-                &listener);
-
-            if (QUIC_FAILED(status)) {
-                LOG_ERROR("initialize failed: ListenerOpen status=0x%08X", status);
-                return false;
-            }
-
-            // Start listening
-            QUIC_ADDR addr = { 0 };
-            QuicAddrSetFamily(&addr, QUIC_ADDRESS_FAMILY_INET);
-            QuicAddrSetPort(&addr, port);
-
-            const QUIC_BUFFER alpnBufferList[] = {
-                { (uint32_t)alpn.length(), (uint8_t*)alpn.c_str() }
-            };
-
-            status = MsQuic->ListenerStart(listener, alpnBufferList, 1, &addr);
-
-            if (QUIC_FAILED(status)) {
-                LOG_ERROR("initialize failed: ListenerStart status=0x%08X", status);
-                return false;
-            }
-
             initialized = true;
-            LOG_INFO("MsquicServer Protocol: %s Accept Port: %d  initialize SUCCESS", alpn.c_str(), port);
             return true;
+        }
+
+        void MsquicServer::shutDown()
+        {
+            // 防止重复调用
+            if (!initialized) return;
+
+            LOG_INFO("MsquicServer shutting down...");
+
+            // 1. 关闭 Listener
+            if (listener != nullptr) {
+                MsQuic->ListenerStop(listener);
+                // ListenerClose 会阻塞直到所有待处理的 Listener 事件处理完毕
+                MsQuic->ListenerClose(listener);
+                listener = nullptr;
+            }
+
+            msquicManagers.clear();
+
+            // 3. 关闭 Registration 和 Configuration
+            // 这些对象通常不产生异步回调，但按顺序关闭是个好习惯
+            if (configuration != nullptr) {
+                delete configuration;
+                configuration = nullptr; // MsQuicConfiguration 包装类如果内部调了 Close 则 delete 也可以
+            }
+
+            if (registration != nullptr) {
+                // RegistrationClose 应该在所有子对象(Conns/Config)关闭后调用
+                // 你的 MsQuicRegistration 包装类析构函数里应该调用了 RegistrationClose
+                delete registration;
+                registration = nullptr;
+            }
+
+            // ---------------------------------------------------------
+            // 第二阶段：停止执行引擎 (IOCP 线程)
+            // ---------------------------------------------------------
+            // 此时 MsQuic 已经完全关闭，不再会有新的事件投递到 IOCP
+
+            // 1. 设置退出标志
+            iocpRunEvent.store(false);
+
+            // 2. 唤醒所有卡在 GetQueuedCompletionStatusEx 的线程
+            if (ioCompletionPorts) {
+                for (int i = 0; i < size; i++) {
+                    // 发送一个特殊的空包，让线程从阻塞中醒来并检查 iocpRunEvent
+                    PostQueuedCompletionStatus(ioCompletionPorts[i], 0, 0, NULL);
+                }
+            }
+
+            // 3. 等待线程真正退出
+            for (auto& t : iocpThreads) {
+                if (t.joinable()) {
+                    t.join();
+                }
+            }
+            iocpThreads.clear();
+
+            // ---------------------------------------------------------
+            // 第三阶段：释放底层系统资源
+            // ---------------------------------------------------------
+
+            // 1. 关闭 IOCP 句柄
+            if (ioCompletionPorts) {
+                for (int i = 0; i < size; i++) {
+                    CloseHandle(ioCompletionPorts[i]);
+                }
+                delete[] ioCompletionPorts;
+                ioCompletionPorts = nullptr;
+            }
+
+            // 2. 释放配置数组
+            // MsQuic 已经不再使用这些 Config 了，可以安全释放
+            if (executions) {
+                delete[] executions;
+                executions = nullptr;
+            }
+
+            if (configs) {
+                delete[] configs;
+                configs = nullptr;
+            }
+
+            initialized = false;
+
+            LOG_INFO("MsquicServer shutdown complete.");
         }
 
         MsQuicRegistration* MsquicServer::getRegistration()

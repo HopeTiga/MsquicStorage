@@ -28,6 +28,8 @@ namespace hope {
 
 			bool initialize();
 
+			bool RunEventLoop();
+
 			MsQuicRegistration* getRegistration();
 
 			MsQuicConfiguration* getConfiguration();
@@ -63,6 +65,15 @@ namespace hope {
 
 			std::atomic<size_t> loadBalancer{ 0 };
 
+			QUIC_EXECUTION** executions;
+
+			HANDLE* ioCompletionPorts;
+
+			QUIC_EXECUTION_CONFIG* configs;
+
+			std::vector<std::thread> iocpThreads;
+
+			std::atomic<bool> iocpRunEvent{ false };
 
 		};
 
