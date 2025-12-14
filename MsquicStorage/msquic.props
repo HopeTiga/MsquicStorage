@@ -28,7 +28,7 @@
     </ClCompile>
     <ClCompile>
       <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
-      <PreprocessorDefinitions>QUIC_API_ENABLE_PREVIEW_FEATURES;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>QUIC_API_ENABLE_PREVIEW_FEATURES;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>

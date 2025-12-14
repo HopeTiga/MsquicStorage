@@ -83,7 +83,7 @@ namespace hope {
         bool MsquicServer::initialize()
         {
 
-            if (initialize) return true;
+            if (initialized) return true;
             
             // Check if MsQuicApi is valid
             if (MsQuic == nullptr) {
