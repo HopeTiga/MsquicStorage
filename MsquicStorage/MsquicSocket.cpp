@@ -119,11 +119,136 @@ namespace hope {
         void MsquicSocket::receiveAsync(QUIC_STREAM_EVENT* event)
         {
             auto* rev = &event->RECEIVE;
+
+            // 1. 如果只有一个缓冲区，按原逻辑处理
+            if (rev->BufferCount == 1) {
+                const auto& buf = rev->Buffers[0];
+
+                if (buf.Length >= sizeof(int64_t)) {
+                    int64_t bodyLen = *reinterpret_cast<const int64_t*>(buf.Buffer);
+                    int64_t totalLen = sizeof(int64_t) + bodyLen;
+
+                    if (buf.Length >= totalLen) {
+                        // 零拷贝直接解析
+                        std::string_view jsonStr(
+                            reinterpret_cast<const char*>(buf.Buffer + sizeof(int64_t)),
+                            bodyLen
+                        );
+
+                        try {
+                            auto json = boost::json::parse(jsonStr).as_object();
+                            auto msquicData = std::make_shared<MsquicData>(
+                                json, shared_from_this(), msquicManager);
+                            msquicManager->getMsquicLogicSystem()->postTaskAsync(std::move(msquicData));
+                        }
+                        catch (const std::exception& e) {
+                            LOG_ERROR("JSON parse error: %s", e.what());
+                        }
+
+                        // 处理剩余数据
+                        if (buf.Length > totalLen) {
+                            receivedBuffer.assign(
+                                buf.Buffer + totalLen,
+                                buf.Buffer + buf.Length
+                            );
+                            tryParse();
+                        }
+                        return;
+                    }
+                }
+            }
+            // 2. 多个缓冲区但数据头完整在第一个缓冲区
+            else if (rev->BufferCount > 1) {
+                const auto& firstBuf = rev->Buffers[0];
+
+                if (firstBuf.Length >= sizeof(int64_t)) {
+                    int64_t bodyLen = *reinterpret_cast<const int64_t*>(firstBuf.Buffer);
+                    int64_t totalLen = sizeof(int64_t) + bodyLen;
+
+                    // 计算所有缓冲区的总长度
+                    uint64_t totalBytes = 0;
+                    for (uint32_t i = 0; i < rev->BufferCount; ++i) {
+                        totalBytes += rev->Buffers[i].Length;
+                    }
+
+                    // 如果多个缓冲区中包含完整数据包
+                    if (totalBytes >= totalLen) {
+                        // 从多个缓冲区构建JSON字符串
+                        std::string jsonStr;
+                        jsonStr.reserve(bodyLen);
+
+                        // 第一个缓冲区：跳过头部
+                        uint64_t bytesFromFirst = std::min(
+                            static_cast<uint64_t>(firstBuf.Length - sizeof(int64_t)),
+                            static_cast<uint64_t>(bodyLen)
+                        );
+                        jsonStr.append(
+                            reinterpret_cast<const char*>(firstBuf.Buffer + sizeof(int64_t)),
+                            bytesFromFirst
+                        );
+
+                        // 后续缓冲区：添加剩余JSON数据
+                        uint64_t jsonBytesCollected = bytesFromFirst;
+                        for (uint32_t i = 1; i < rev->BufferCount && jsonBytesCollected < bodyLen; ++i) {
+                            const auto& buf = rev->Buffers[i];
+                            uint64_t toCopy = std::min(
+                                static_cast<uint64_t>(buf.Length),
+                                static_cast<uint64_t>(bodyLen - jsonBytesCollected)
+                            );
+                            jsonStr.append(
+                                reinterpret_cast<const char*>(buf.Buffer),
+                                toCopy
+                            );
+                            jsonBytesCollected += toCopy;
+                        }
+
+                        try {
+                            auto json = boost::json::parse(jsonStr).as_object();
+                            auto msquicData = std::make_shared<MsquicData>(
+                                json, shared_from_this(), msquicManager);
+                            msquicManager->getMsquicLogicSystem()->postTaskAsync(std::move(msquicData));
+
+                            // 处理剩余数据
+                            uint64_t consumedBytes = totalLen;
+                            receivedBuffer.clear();
+
+                            // 跳过已消费的数据
+                            for (uint32_t i = 0; i < rev->BufferCount && consumedBytes > 0; ++i) {
+                                const auto& buf = rev->Buffers[i];
+                                if (consumedBytes >= buf.Length) {
+                                    consumedBytes -= buf.Length;
+                                }
+                                else {
+                                    // 当前缓冲区有剩余数据
+                                    uint64_t remaining = buf.Length - consumedBytes;
+                                    receivedBuffer.insert(
+                                        receivedBuffer.end(),
+                                        buf.Buffer + consumedBytes,
+                                        buf.Buffer + buf.Length
+                                    );
+                                    consumedBytes = 0;
+                                }
+                            }
+
+                            if (!receivedBuffer.empty()) {
+                                tryParse();
+                            }
+                            return;  // 零拷贝处理完毕
+                        }
+                        catch (const std::exception& e) {
+                            LOG_ERROR("JSON parse error: %s", e.what());
+                            // 解析失败，回退到缓冲区拷贝方式
+                        }
+                    }
+                }
+            }
+
+            // 3. 不能零拷贝解析，回退到原逻辑
             for (uint32_t i = 0; i < rev->BufferCount; ++i) {
                 const auto& buf = rev->Buffers[i];
                 receivedBuffer.insert(receivedBuffer.end(), buf.Buffer, buf.Buffer + buf.Length);
             }
-            tryParse();          // 每次事件都尝试解析
+            tryParse();
         }
 
         void MsquicSocket::tryParse()

@@ -243,7 +243,7 @@ namespace hope {
                     QUIC_CONNECTION_SHUTDOWN_FLAG_NONE,
                     QUIC_STATUS_SUCCESS
                     );
-                MsQuic->ConnectionClose(connection);
+
                 connection = nullptr;
 
             }
@@ -261,19 +261,154 @@ namespace hope {
             return connected.load();
         }
 
-        void MsquicSocketClient::handleReceive(QUIC_STREAM_EVENT* event) {
-            auto* receive = &event->RECEIVE;
-            for (uint32_t i = 0; i < receive->BufferCount; ++i) {
-                const auto& buf = receive->Buffers[i];
+        void MsquicSocketClient::handleReceive(QUIC_STREAM_EVENT* event)
+        {
+            auto* rev = &event->RECEIVE;
+
+            // 1. 如果只有一个缓冲区，按原逻辑处理
+            if (rev->BufferCount == 1) {
+                const auto& buf = rev->Buffers[0];
+
+                if (buf.Length >= sizeof(int64_t)) {
+                    int64_t bodyLen = *reinterpret_cast<const int64_t*>(buf.Buffer);
+                    int64_t totalLen = sizeof(int64_t) + bodyLen;
+
+                    if (buf.Length >= totalLen) {
+                        // 零拷贝直接解析
+                        std::string_view jsonStr(
+                            reinterpret_cast<const char*>(buf.Buffer + sizeof(int64_t)),
+                            bodyLen
+                        );
+
+                        try {
+                            auto json = boost::json::parse(jsonStr).as_object();
+          
+                            if (onDataReceivedHandle) {
+
+                                onDataReceivedHandle(json);
+
+                            }
+
+                        }
+                        catch (const std::exception& e) {
+                            LOG_ERROR("JSON parse error: %s", e.what());
+                        }
+
+                        // 处理剩余数据
+                        if (buf.Length > totalLen) {
+                            receivedBuffer.assign(
+                                buf.Buffer + totalLen,
+                                buf.Buffer + buf.Length
+                            );
+                            tryParse();
+                        }
+                        return;
+                    }
+                }
+            }
+            // 2. 多个缓冲区但数据头完整在第一个缓冲区
+            else if (rev->BufferCount > 1) {
+                const auto& firstBuf = rev->Buffers[0];
+
+                if (firstBuf.Length >= sizeof(int64_t)) {
+                    int64_t bodyLen = *reinterpret_cast<const int64_t*>(firstBuf.Buffer);
+                    int64_t totalLen = sizeof(int64_t) + bodyLen;
+
+                    // 计算所有缓冲区的总长度
+                    uint64_t totalBytes = 0;
+                    for (uint32_t i = 0; i < rev->BufferCount; ++i) {
+                        totalBytes += rev->Buffers[i].Length;
+                    }
+
+                    // 如果多个缓冲区中包含完整数据包
+                    if (totalBytes >= totalLen) {
+                        // 从多个缓冲区构建JSON字符串
+                        std::string jsonStr;
+                        jsonStr.reserve(bodyLen);
+
+                        // 第一个缓冲区：跳过头部
+                        uint64_t bytesFromFirst = std::min(
+                            static_cast<uint64_t>(firstBuf.Length - sizeof(int64_t)),
+                            static_cast<uint64_t>(bodyLen)
+                        );
+                        jsonStr.append(
+                            reinterpret_cast<const char*>(firstBuf.Buffer + sizeof(int64_t)),
+                            bytesFromFirst
+                        );
+
+                        // 后续缓冲区：添加剩余JSON数据
+                        uint64_t jsonBytesCollected = bytesFromFirst;
+                        for (uint32_t i = 1; i < rev->BufferCount && jsonBytesCollected < bodyLen; ++i) {
+                            const auto& buf = rev->Buffers[i];
+                            uint64_t toCopy = std::min(
+                                static_cast<uint64_t>(buf.Length),
+                                static_cast<uint64_t>(bodyLen - jsonBytesCollected)
+                            );
+                            jsonStr.append(
+                                reinterpret_cast<const char*>(buf.Buffer),
+                                toCopy
+                            );
+                            jsonBytesCollected += toCopy;
+                        }
+
+                        try {
+                            auto json = boost::json::parse(jsonStr).as_object();
+                 
+                            if (onDataReceivedHandle) {
+                            
+                                onDataReceivedHandle(json);
+
+                            }
+
+                            // 处理剩余数据
+                            uint64_t consumedBytes = totalLen;
+                            receivedBuffer.clear();
+
+                            // 跳过已消费的数据
+                            for (uint32_t i = 0; i < rev->BufferCount && consumedBytes > 0; ++i) {
+                                const auto& buf = rev->Buffers[i];
+                                if (consumedBytes >= buf.Length) {
+                                    consumedBytes -= buf.Length;
+                                }
+                                else {
+                                    // 当前缓冲区有剩余数据
+                                    uint64_t remaining = buf.Length - consumedBytes;
+                                    receivedBuffer.insert(
+                                        receivedBuffer.end(),
+                                        buf.Buffer + consumedBytes,
+                                        buf.Buffer + buf.Length
+                                    );
+                                    consumedBytes = 0;
+                                }
+                            }
+
+                            if (!receivedBuffer.empty()) {
+                                tryParse();
+                            }
+                            return;  // 零拷贝处理完毕
+                        }
+                        catch (const std::exception& e) {
+                            LOG_ERROR("JSON parse error: %s", e.what());
+                            // 解析失败，回退到缓冲区拷贝方式
+                        }
+                    }
+                }
+            }
+
+            // 3. 不能零拷贝解析，回退到原逻辑
+            for (uint32_t i = 0; i < rev->BufferCount; ++i) {
+                const auto& buf = rev->Buffers[i];
                 receivedBuffer.insert(receivedBuffer.end(), buf.Buffer, buf.Buffer + buf.Length);
             }
             tryParse();
         }
 
-        void MsquicSocketClient::tryParse() {
+        void MsquicSocketClient::tryParse()
+        {
             constexpr size_t headerSize = sizeof(int64_t);
 
             while (true) {
+
                 // 1. 检查头部
                 if (receivedBuffer.size() < headerSize) return;
 
@@ -297,19 +432,16 @@ namespace hope {
                 // 移除 Body
                 receivedBuffer.erase(receivedBuffer.begin(), receivedBuffer.begin() + len);
 
-                // 解析JSON
-                try {
-                    boost::json::object json = boost::json::parse(
-                        std::string(payload.begin(), payload.end())).as_object();
+                /* 4. 业务回调（json 在 payload 里） */
+                boost::json::object json =
+                    boost::json::parse(std::string(payload.begin(), payload.end())).as_object();
 
-                    if (onDataReceivedHandle) {
-                        onDataReceivedHandle(json);
-                    }
+                if (onDataReceivedHandle) {
+
+                    onDataReceivedHandle(json);
 
                 }
-                catch (const std::exception& e) {
-                    LOG_ERROR("hope::quic::MsquicSocketClient::tryParse Error: %s",e.what());
-                }
+  
             }
         }
 
