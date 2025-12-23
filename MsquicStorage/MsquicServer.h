@@ -6,7 +6,7 @@
 #include <thread>
 #include <functional>
 
-#include <boost/asio/awaitable.hpp>
+#include <boost/asio.hpp>
 
 namespace hope {
 
@@ -22,7 +22,7 @@ namespace hope {
 
 		public:
 
-			MsquicServer(size_t port = 8088,std::string alpn = "quic",size_t size = std::thread::hardware_concurrency() );
+			MsquicServer(boost::asio::io_context& ioContext, size_t msquicStoragePort = 8088, size_t webSocketPort = 8088,std::string alpn = "quic",size_t size = std::thread::hardware_concurrency() );
 
 			~MsquicServer();
 
@@ -42,9 +42,17 @@ namespace hope {
 
 			std::shared_ptr<MsquicManager> loadBalanceMsquicManger();
 
+			bool RunMsquicLoop();
+
+			bool RunWebSocketLoop();
+
 		private:
 
-			size_t port;
+			size_t msquicStoragePort;
+
+			size_t webSocketPort;
+
+			boost::asio::io_context& ioContext;
 
 			std::string alpn;
 
@@ -57,6 +65,10 @@ namespace hope {
 
 			// MsQuic 监听器
 			HQUIC listener;
+
+			boost::asio::ip::tcp::acceptor accept;
+
+			std::atomic<bool> runAccepct{ false };
 
 			// 初始化标志
 			bool initialized;

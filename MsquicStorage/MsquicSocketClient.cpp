@@ -446,6 +446,10 @@ namespace hope {
         }
 
         void MsquicSocketClient::clear() {
+
+            onConnectionHandle = nullptr;
+
+            onDataReceivedHandle = nullptr;
             // 先标记断开，防止新操作
             connected.store(false);
 
@@ -485,6 +489,8 @@ namespace hope {
                     QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT,
                     QUIC_STATUS_ABORTED
                     );
+
+                MsQuic->ConnectionClose(connection);
 
                 connection = nullptr;
             }

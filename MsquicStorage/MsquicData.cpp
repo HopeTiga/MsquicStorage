@@ -1,14 +1,14 @@
 #include "MsquicData.h"
 
-#include "MsquicSocket.h"
+#include "MsquicSocketInterface.h"
 #include "MsquicManager.h"
 
 namespace hope {
 	namespace quic {
 
-		MsquicData::MsquicData(boost::json::object json, std::shared_ptr<MsquicSocket> msquicSocket, MsquicManager* msquicManager)
-			:json(json)
-			, msquicSocket(msquicSocket)
+		MsquicData::MsquicData(boost::json::object json, std::shared_ptr<MsquicSocketInterface> msquicSocketInterface, MsquicManager* msquicManager)
+			: json(json)
+			, msquicSocketInterface(msquicSocketInterface)
 			, msquicManager(msquicManager) {
 
 		}

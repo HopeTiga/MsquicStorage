@@ -9,41 +9,63 @@
 #include <chrono>
 #include <boost/json.hpp>
 
+#ifdef _WIN32
+#include <direct.h>
+#define mkdir(dir) _mkdir(dir)
+#else
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
+#include "MsquicSocketInterface.h"
+#include "MsquicSocket.h"
+#include "WebRTCSignalSocket.h"
+
 constexpr std::chrono::seconds PING_INTERVAL = std::chrono::seconds(30);
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-typedef enum {
-    LOG_INFO,
-    LOG_WARNING,
-    LOG_ERROR,
-    LOG_DEBUG
-} LogLevel;
+    // 日志级别
+    typedef enum {
+        LOG_LEVEL_DEBUG,
+        LOG_LEVEL_INFO,
+        LOG_LEVEL_WARNING,
+        LOG_LEVEL_ERROR
+    } LogLevel;
 
+    // 初始化函数
+    void initLogger();
+    void closeLogger();
+    void enableFileLogging(int enable);
+    void setLogDirectory(const char* dir);
 
-#define LOG_INFO(fmt, ...)    log_message(LOG_INFO, fmt, ##__VA_ARGS__)
-#define LOG_WARNING(fmt, ...) log_message(LOG_WARNING, fmt, ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...)   log_message(LOG_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_DEBUG(fmt, ...)   log_message(LOG_DEBUG, fmt, ##__VA_ARGS__)
+    // 核心日志函数
+    void logMessage(LogLevel level, const char* format, ...);
+    void logMessagePlain(LogLevel level, const char* format, ...);
+    void logToFileOnly(LogLevel level, const char* format, ...);
 
+    // 辅助函数
+    void getTimestamp(char* buffer, size_t size);
+    void getLevelInfo(LogLevel level, const char** levelStr, const char** color);
 
-#define LOG_INFO_PLAIN(fmt, ...)    log_message_plain(LOG_INFO, fmt, ##__VA_ARGS__)
-#define LOG_WARNING_PLAIN(fmt, ...) log_message_plain(LOG_WARNING, fmt, ##__VA_ARGS__)
-#define LOG_ERROR_PLAIN(fmt, ...)   log_message_plain(LOG_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_DEBUG_PLAIN(fmt, ...)   log_message_plain(LOG_DEBUG, fmt, ##__VA_ARGS__)
+    void setConsoleOutputLevels(int debug, int info, int warning, int error);
 
+    // 便捷宏定义
+#define LOG_INFO(fmt, ...)    logMessage(LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
+#define LOG_WARNING(fmt, ...) logMessage(LOG_LEVEL_WARNING, fmt, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...)   logMessage(LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
+#define LOG_DEBUG(fmt, ...)   logMessage(LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
 
-#define COLOR_RESET   "\033[0m"
-#define COLOR_RED     "\033[91m"
-#define COLOR_GREEN   "\033[92m"
-#define COLOR_YELLOW  "\033[93m"
-#define COLOR_BLUE    "\033[94m"
+#define LOG_INFO_PLAIN(fmt, ...)    logMessagePlain(LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
+#define LOG_WARNING_PLAIN(fmt, ...) logMessagePlain(LOG_LEVEL_WARNING, fmt, ##__VA_ARGS__)
+#define LOG_ERROR_PLAIN(fmt, ...)   logMessagePlain(LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
+#define LOG_DEBUG_PLAIN(fmt, ...)   logMessagePlain(LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
 
-
-void get_timestamp(char* buffer, size_t size);
-void get_level_info(LogLevel level, const char** level_str, const char** color);
-void log_message(LogLevel level, const char* format, ...);
-void log_message_plain(LogLevel level, const char* format, ...);
-
+#ifdef __cplusplus
+}
+#endif
 
 // 粗爆转义 JSON 字符串值（只处理 string 类型）
 static void brutalEscapeJson(boost::json::object& obj) {
@@ -81,25 +103,43 @@ static boost::json::object makeCleanCopy(const boost::json::object& src) {
 
 namespace {
     // 辅助函数：构建消息头 + 消息体（只有length作为消息头）
-    std::pair<unsigned char *, size_t> buildMessage(const std::string& body) {
-        int64_t bodyLength = static_cast<int64_t>(body.size());
-        size_t totalSize = sizeof(int64_t) + bodyLength;
+    std::pair<unsigned char*, size_t> buildData(const std::string& body, hope::quic::MsquicSocketInterface* msquicSocketInterface) {
 
-        unsigned char* buffer = new unsigned char[totalSize];
+        if (dynamic_cast<hope::quic::WebRTCSignalSocket*>(msquicSocketInterface)) {
 
-        // 写入 length (int64_t)
-        *reinterpret_cast<int64_t*>(buffer) = bodyLength;
+            size_t totalSize = body.size();
 
-        // 写入 body
-        memcpy(buffer + sizeof(int64_t), body.data(), bodyLength);
+            unsigned char* buffer = new unsigned char[totalSize];
+            // 写入 body
+            memcpy(buffer, body.data(), totalSize);
 
-        return { std::move(buffer), totalSize };
+            return { std::move(buffer), body.size() };
+        }
+        else {
+
+            int64_t bodyLength = static_cast<int64_t>(body.size());
+            size_t totalSize = sizeof(int64_t) + bodyLength;
+
+            unsigned char* buffer = new unsigned char[totalSize];
+
+            // 写入 length (int64_t)
+            *reinterpret_cast<int64_t*>(buffer) = bodyLength;
+
+            // 写入 body
+            memcpy(buffer + sizeof(int64_t), body.data(), bodyLength);
+
+            return { std::move(buffer), totalSize };
+
+        }
+
     }
 
     // 重载版本，直接使用 json
-    std::pair<unsigned char * , size_t> buildMessage(const boost::json::object& jsonObj) {
+    std::pair<unsigned char*, size_t> buildMessage(const boost::json::object& jsonObj, hope::quic::MsquicSocketInterface* msquicSocketInterface) {
+
         std::string body = boost::json::serialize(jsonObj);
-        return buildMessage(body);
+
+        return buildData(body, msquicSocketInterface);
     }
 }
 

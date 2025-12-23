@@ -28,7 +28,7 @@ namespace hope {
 		{
 			actorSocketMappingIndex.clear();
 
-			msquicSocketMap.clear();
+			msquicSocketInterfaceMap.clear();
 
 		}
 
@@ -42,16 +42,16 @@ namespace hope {
 
             LOG_INFO("Remove MsquicSocket: %s", accountId.c_str());
 
-			auto it = msquicSocketMap.find(accountId);
+			auto it = msquicSocketInterfaceMap.find(accountId);
 
-			if (it == msquicSocketMap.end()) {
+			if (it == msquicSocketInterfaceMap.end()) {
 
 				LOG_WARNING("Connection already removed: %s", accountId.c_str());
 
 				return;
 			}
 
-			msquicSocketMap.erase(it);
+			msquicSocketInterfaceMap.erase(it);
 
             int mapChannelIndex = hasher(accountId) % hashSize;
 

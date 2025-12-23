@@ -25,11 +25,13 @@ int main() {
 
     boost::asio::io_context ioContext;
 
-    size_t port = ConfigManager::Instance().GetInt("MsquicStorage.port");
+    size_t msquicStoragePort = ConfigManager::Instance().GetInt("MsquicStorage.port");
+
+    size_t webSocketPort = ConfigManager::Instance().GetInt("WebSocket.port");
 
     std::unique_ptr<boost::asio::executor_work_guard<boost::asio::io_context::executor_type>> work = std::make_unique<boost::asio::executor_work_guard<boost::asio::io_context::executor_type>>(boost::asio::make_work_guard(ioContext));
 
-    hope::quic::MsquicServer msquicServer(port);
+    hope::quic::MsquicServer msquicServer(ioContext,msquicStoragePort, webSocketPort);
 
     hope::mysql::MsquicMysqlManagerPools::getInstance();
 

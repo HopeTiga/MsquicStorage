@@ -1,7 +1,7 @@
 #include "MsquicLogicSystem.h"
 #include "MsquicServer.h"
 #include "MsquicManager.h"
-#include "MsquicSocket.h"
+#include "msquicSocketInterface.h"
 #include "MsquicData.h"
 
 #include "MsquicMysqlManagerPools.h"
@@ -121,9 +121,9 @@ namespace hope {
             auto self = shared_from_this();
 
             std::function<boost::asio::awaitable<void>(std::shared_ptr<hope::quic::MsquicData>, std::shared_ptr<hope::mysql::MsquicMysqlManager>, std::string)> forwardHandler = [self](std::shared_ptr<hope::quic::MsquicData> data, std::shared_ptr<hope::mysql::MsquicMysqlManager>, std::string requestTypeStr)->boost::asio::awaitable<void> {
-
                 boost::json::object message = data->json;
-                auto msquicSocket = data->msquicSocket;
+
+                auto msquicSocketInterface = data->msquicSocketInterface.get();
                 int64_t requestTypeValue = message["requestType"].as_int64();
 
                 if (!message.contains("accountId") || !message.contains("targetId")) {
@@ -133,12 +133,12 @@ namespace hope {
 
                 std::string accountId = message["accountId"].as_string().c_str();
                 std::string targetId = message["targetId"].as_string().c_str();
-                std::shared_ptr<hope::quic::MsquicSocket> targetSocket = nullptr;
+                std::shared_ptr<hope::quic::MsquicSocketInterface> targetSocket = nullptr;
 
-                // 1. 查找目标连接
+                // 1. 查找目标连接 (使用哈希锁)
                 {
-                    auto it = data->msquicManager->msquicSocketMap.find(targetId);
-                    if (it != data->msquicManager->msquicSocketMap.end()) {
+                    auto it = data->msquicManager->msquicSocketInterfaceMap.find(targetId);
+                    if (it != data->msquicManager->msquicSocketInterfaceMap.end()) {
                         targetSocket = it->second;
                     }
                 }
@@ -151,25 +151,23 @@ namespace hope {
                     if (handles.value() == -1) {
                         int mapChannelIndex = data->msquicManager->hasher(targetId) % data->msquicManager->hashSize;
 
-                        data->msquicManager->msquicServer->postTaskAsync(mapChannelIndex, [=](std::shared_ptr<hope::quic::MsquicManager> manager) ->boost::asio::awaitable<void> {
-
+                        data->msquicManager->msquicServer->postTaskAsync(mapChannelIndex, [=](std::shared_ptr<hope::quic::MsquicManager> manager)->boost::asio::awaitable<void> {
                             if (manager->actorSocketMappingIndex.find(targetId) != manager->actorSocketMappingIndex.end()) {
                                 int targetChannelIndex = manager->actorSocketMappingIndex[targetId];
 
                                 self->msquicServer->postTaskAsync(targetChannelIndex, [=](std::shared_ptr<hope::quic::MsquicManager> manager)->boost::asio::awaitable<void> {
-
-                                    if (manager->msquicSocketMap.find(targetId) != manager->msquicSocketMap.end()) {
+                                    if (manager->msquicSocketInterfaceMap.find(targetId) != manager->msquicSocketInterfaceMap.end()) {
                                         if (tbb::concurrent_lru_cache<std::string, int>::handle handles = self->localRouteCache[targetId]) {
                                             handles.value() = manager->channelIndex;
                                         }
-
+                                        std::shared_ptr<hope::quic::MsquicSocketInterface> targetmsquicSocketInterface = manager->msquicSocketInterfaceMap[targetId];
                                         boost::json::object forwardMessage = message;
                                         forwardMessage["state"] = 200;
-                                        forwardMessage["message"] = "MsquicStorage forward";
+                                        forwardMessage["message"] = "MsquicWebTransportServer forward";
 
-                                        // 修改这里：构建二进制消息
-                                        auto [buffer, size] = buildMessage(forwardMessage);
-                                        manager->msquicSocketMap[targetId]->writeAsync(buffer, size);
+                                        // 构建二进制消息
+                                        auto [buffer, size] = buildMessage(forwardMessage, targetmsquicSocketInterface.get());
+                                        targetmsquicSocketInterface->writeAsync(buffer, size);
 
                                         LOG_INFO("Request forward: %s -> %s (Request Type: %s)", accountId.c_str(), targetId.c_str(), requestTypeStr);
                                         co_return;
@@ -180,9 +178,9 @@ namespace hope {
                                         response["state"] = 404;
                                         response["message"] = "targetId is not register";
 
-                                        // 修改这里：构建二进制消息
-                                        auto [buffer, size] = buildMessage(response);
-                                        msquicSocket->writeAsync(buffer, size);
+                                        // 构建二进制消息
+                                        auto [buffer, size] = buildMessage(response, msquicSocketInterface);
+                                        msquicSocketInterface->writeAsync(buffer, size);
 
                                         LOG_WARNING("Request forward Not Found (404): %s -> %s (Request Type: %s)", accountId.c_str(), targetId.c_str(), requestTypeStr);
                                         co_return;
@@ -195,9 +193,9 @@ namespace hope {
                                 response["state"] = 404;
                                 response["message"] = "targetId is not register";
 
-                                // 修改这里：构建二进制消息
-                                auto [buffer, size] = buildMessage(response);
-                                msquicSocket->writeAsync(buffer, size);
+                                // 构建二进制消息
+                                auto [buffer, size] = buildMessage(response, msquicSocketInterface);
+                                msquicSocketInterface->writeAsync(buffer, size);
 
                                 LOG_WARNING("Request forward Not Found (404): %s -> %s (Request Type: %s)", accountId.c_str(), targetId.c_str(), requestTypeStr);
                                 co_return;
@@ -206,19 +204,18 @@ namespace hope {
                     }
                     else {
                         data->msquicManager->msquicServer->postTaskAsync(handles.value(), [=](std::shared_ptr<hope::quic::MsquicManager> manager)->boost::asio::awaitable<void> {
-
-                            if (manager->msquicSocketMap.find(targetId) != manager->msquicSocketMap.end()) {
+                            if (manager->msquicSocketInterfaceMap.find(targetId) != manager->msquicSocketInterfaceMap.end()) {
                                 if (tbb::concurrent_lru_cache<std::string, int>::handle handles = self->localRouteCache[targetId]) {
                                     handles.value() = manager->channelIndex;
                                 }
-
+                                std::shared_ptr<hope::quic::MsquicSocketInterface> targetmsquicSocketInterface = manager->msquicSocketInterfaceMap[targetId];
                                 boost::json::object forwardMessage = message;
                                 forwardMessage["state"] = 200;
-                                forwardMessage["message"] = "MsquicStorage forward";
+                                forwardMessage["message"] = "msquicServer forward";
 
-                                // 修改这里：构建二进制消息
-                                auto [buffer, size] = buildMessage(forwardMessage);
-                                manager->msquicSocketMap[targetId]->writeAsync(buffer, size);
+                                // 构建二进制消息
+                                auto [buffer, size] = buildMessage(forwardMessage, targetmsquicSocketInterface.get());
+                                targetmsquicSocketInterface->writeAsync(buffer, size);
 
                                 LOG_INFO("Request forward: %s -> %s (Request Type: %s)", accountId.c_str(), targetId.c_str(), requestTypeStr);
                                 co_return;
@@ -227,24 +224,22 @@ namespace hope {
                                 int mapChannelIndex = data->msquicManager->hasher(targetId) % data->msquicManager->hashSize;
 
                                 data->msquicManager->msquicServer->postTaskAsync(mapChannelIndex, [=](std::shared_ptr<hope::quic::MsquicManager> manager)->boost::asio::awaitable<void> {
-
                                     if (manager->actorSocketMappingIndex.find(targetId) != manager->actorSocketMappingIndex.end()) {
                                         int targetChannelIndex = manager->actorSocketMappingIndex[targetId];
 
-                                        self->msquicServer->postTaskAsync(targetChannelIndex, [=](std::shared_ptr<hope::quic::MsquicManager> manager) ->boost::asio::awaitable<void> {
-
-                                            if (manager->msquicSocketMap.find(targetId) != manager->msquicSocketMap.end()) {
+                                        self->msquicServer->postTaskAsync(targetChannelIndex, [=](std::shared_ptr<hope::quic::MsquicManager> manager)->boost::asio::awaitable<void> {
+                                            if (manager->msquicSocketInterfaceMap.find(targetId) != manager->msquicSocketInterfaceMap.end()) {
                                                 if (tbb::concurrent_lru_cache<std::string, int>::handle handles = self->localRouteCache[targetId]) {
                                                     handles.value() = manager->channelIndex;
                                                 }
-
+                                                std::shared_ptr<hope::quic::MsquicSocketInterface> targetmsquicSocketInterface = manager->msquicSocketInterfaceMap[targetId];
                                                 boost::json::object forwardMessage = message;
                                                 forwardMessage["state"] = 200;
-                                                forwardMessage["message"] = "MsquicStorage forward";
+                                                forwardMessage["message"] = "msquicServer forward";
 
-                                                // 修改这里：构建二进制消息
-                                                auto [buffer, size] = buildMessage(forwardMessage);
-                                                manager->msquicSocketMap[targetId]->writeAsync(buffer, size);
+                                                // 构建二进制消息
+                                                auto [buffer, size] = buildMessage(forwardMessage, targetmsquicSocketInterface.get());
+                                                targetmsquicSocketInterface->writeAsync(buffer, size);
 
                                                 LOG_INFO("Request forward: %s -> %s (Request Type: %s)", accountId.c_str(), targetId.c_str(), requestTypeStr);
                                                 co_return;
@@ -255,9 +250,9 @@ namespace hope {
                                                 response["state"] = 404;
                                                 response["message"] = "targetId is not register";
 
-                                                // 修改这里：构建二进制消息
-                                                auto [buffer, size] = buildMessage(response);
-                                                msquicSocket->writeAsync(buffer, size);
+                                                // 构建二进制消息
+                                                auto [buffer, size] = buildMessage(response, msquicSocketInterface);
+                                                msquicSocketInterface->writeAsync(buffer, size);
 
                                                 LOG_WARNING("Request forward Not Found (404): %s -> %s (Request Type: %s)", accountId.c_str(), targetId.c_str(), requestTypeStr);
                                                 co_return;
@@ -270,9 +265,9 @@ namespace hope {
                                         response["state"] = 404;
                                         response["message"] = "targetId is not register";
 
-                                        // 修改这里：构建二进制消息
-                                        auto [buffer, size] = buildMessage(response);
-                                        msquicSocket->writeAsync(buffer, size);
+                                        // 构建二进制消息
+                                        auto [buffer, size] = buildMessage(response, msquicSocketInterface);
+                                        msquicSocketInterface->writeAsync(buffer, size);
 
                                         LOG_WARNING("Request forward Not Found (404): %s -> %s (Request Type: %s)", accountId.c_str(), targetId.c_str(), requestTypeStr);
                                         co_return;
@@ -287,10 +282,10 @@ namespace hope {
                 // 3. 转发消息
                 boost::json::object forwardMessage = message;
                 forwardMessage["state"] = 200;
-                forwardMessage["message"] = "MsquicStorage forward";
+                forwardMessage["message"] = "MsquicWebTransportServer forward";
 
-                // 修改这里：构建二进制消息
-                auto [buffer, size] = buildMessage(forwardMessage);
+                // 构建二进制消息
+                auto [buffer, size] = buildMessage(forwardMessage, targetSocket.get());
                 targetSocket->writeAsync(buffer, size);
 
                 LOG_INFO("Request forward: %s -> %s (Request Type: %s)", accountId.c_str(), targetId.c_str(), requestTypeStr);
@@ -299,33 +294,95 @@ namespace hope {
             msquicHandlers[0] = std::pair<bool, std::function<boost::asio::awaitable<void>(std::shared_ptr<hope::quic::MsquicData>, std::shared_ptr<hope::mysql::MsquicMysqlManager>)>>(false, [self](std::shared_ptr<hope::quic::MsquicData> data, std::shared_ptr<hope::mysql::MsquicMysqlManager> mysqlManager)->boost::asio::awaitable<void> {
 
                 boost::json::object& message = data->json;
-                auto msquicSocket = data->msquicSocket;
-                boost::json::object response;
-                response["requestType"] = 0;
 
-                if (!message.contains("accountId")) {
-                    LOG_WARNING("REGISTER Message Missing accountId.");
-                    response["state"] = 500;
-                    response["message"] = "REGISTER Message Missing accountId.";
+                hope::quic::MsquicSocket *  msquicSocket = nullptr;
 
-                    // 修改这里：构建二进制消息
-                    auto [buffer, size] = buildMessage(response);
-                    msquicSocket->writeAsync(buffer, size);
+                hope::quic::WebRTCSignalSocket * webrtcSignalSocket = nullptr;
 
-                    co_return;
+                if (data->msquicSocketInterface->getType() == hope::quic::SocketType::MsquicSocket) {
+                
+                    msquicSocket = static_cast<hope::quic::MsquicSocket*>(data->msquicSocketInterface.get());
+
+                }
+                else if (data->msquicSocketInterface->getType() == hope::quic::SocketType::WebSocket) {
+                
+                    webrtcSignalSocket = static_cast<hope::quic::WebRTCSignalSocket*>(data->msquicSocketInterface.get());
+
                 }
 
-                std::string accountId = message["accountId"].as_string().c_str();
-                msquicSocket->setAccountId(accountId);
-                msquicSocket->setRegistered(true);
-                data->msquicManager->msquicSocketMap[accountId] = msquicSocket;
+                boost::json::object response;
+
+                response["requestType"] = 0;
+
+                std::string accountId;
+
+                if (msquicSocket) {
+
+                    if (!message.contains("accountId")) {
+
+                        LOG_WARNING("REGISTER Message Missing accountId.");
+
+                        response["state"] = 500;
+
+                        response["message"] = "REGISTER Message Missing accountId.";
+
+                        // 修改这里：构建二进制消息
+                        auto [buffer, size] = buildMessage(response, msquicSocket);
+
+                        msquicSocket->writeAsync(buffer, size);
+
+                        co_return;
+                    }
+
+                    accountId = message["accountId"].as_string().c_str();
+
+                    msquicSocket->setAccountId(accountId);
+
+                    msquicSocket->setRegistered(true);
+
+                    data->msquicManager->msquicSocketInterfaceMap[accountId] = data->msquicSocketInterface;
+                }
+                else if (webrtcSignalSocket) {
+
+                    if (!message.contains("accountId")) {
+
+                        LOG_WARNING("REGISTER Message Missing accountId.");
+
+                        response["state"] = 500;
+
+                        response["message"] = "REGISTER Message Missing accountId.";
+
+                        // 修改这里：构建二进制消息
+                        auto [buffer, size] = buildMessage(response, webrtcSignalSocket);
+
+                        webrtcSignalSocket->writeAsync(buffer, size);
+                        
+                        co_return;
+                    }
+
+                    accountId = message["accountId"].as_string().c_str();
+
+                    webrtcSignalSocket->setAccountId(accountId);
+
+                    webrtcSignalSocket->setRegistered(true);
+
+                    data->msquicManager->msquicSocketInterfaceMap[accountId] = data->msquicSocketInterface;
+
+                }
+                else {
+                
+                    LOG_ERROR("Unknow SocketType:%d", static_cast<int>(data->msquicSocketInterface->getType()));
+
+                }
 
                 response["state"] = 200;
+
                 response["message"] = "register successful";
 
                 // 修改这里：构建二进制消息
-                auto [buffer, size] = buildMessage(response);
-                msquicSocket->writeAsync(buffer, size);
+                auto [buffer, size] = buildMessage(response, data->msquicSocketInterface.get());
+
+                data->msquicSocketInterface->writeAsync(buffer, size);
 
                 int mapChannelIndex = data->msquicManager->hasher(accountId) % data->msquicManager->hashSize;
 
@@ -351,11 +408,50 @@ namespace hope {
                 });
 
             msquicHandlers[4] = std::pair<bool, std::function<boost::asio::awaitable<void>(std::shared_ptr<hope::quic::MsquicData>, std::shared_ptr<hope::mysql::MsquicMysqlManager>)>>(false, [self](std::shared_ptr<hope::quic::MsquicData> data, std::shared_ptr<hope::mysql::MsquicMysqlManager> mysqlManager)->boost::asio::awaitable<void> {
-                std::string accountId = data->msquicSocket->getAccountId();
-                if (!accountId.empty()) {
-                    data->msquicManager->removeConnection(accountId);
+               
+                
+                hope::quic::MsquicSocket* msquicSocket = nullptr;
+
+                hope::quic::WebRTCSignalSocket* webrtcSignalSocket = nullptr;
+
+                if (data->msquicSocketInterface->getType() == hope::quic::SocketType::MsquicSocket) {
+
+                    msquicSocket = static_cast<hope::quic::MsquicSocket*>(data->msquicSocketInterface.get());
+
                 }
+                else if (data->msquicSocketInterface->getType() == hope::quic::SocketType::WebSocket) {
+
+                    webrtcSignalSocket = static_cast<hope::quic::WebRTCSignalSocket*>(data->msquicSocketInterface.get());
+
+                }
+
+                std::string accountId;
+
+                if (msquicSocket) {
+
+                    accountId = msquicSocket->getAccountId();
+
+                }
+                else if (webrtcSignalSocket) {
+
+                    accountId = webrtcSignalSocket->getAccountId();
+
+                }
+                else {
+
+                    LOG_ERROR("Unknow SocketType:%d", static_cast<int>(data->msquicSocketInterface->getType()));
+
+                }
+
+
+                if (!accountId.empty()) {
+
+                    data->msquicManager->removeConnection(accountId);
+
+                }
+
                 co_return;
+
                 });
         }
 

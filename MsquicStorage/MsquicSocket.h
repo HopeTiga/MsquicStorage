@@ -6,13 +6,15 @@
 #include <boost/asio.hpp>
 #include <boost/asio/awaitable.hpp>
 
+#include "MsquicSocketInterface.h"
+
 namespace hope {
 
 	namespace quic {
 
 		class MsquicManager;
 	
-		class MsquicSocket : public std::enable_shared_from_this<MsquicSocket>
+		class MsquicSocket :public MsquicSocketInterface, public std::enable_shared_from_this<MsquicSocket>
 		{
 			friend QUIC_STATUS QUIC_API MsquicSocketHandle(HQUIC stream, void* context, QUIC_STREAM_EVENT* event);
 		public:
@@ -41,6 +43,10 @@ namespace hope {
 
 			void shutDown();
 
+			void clear();
+
+			SocketType getType();
+
 		private:
 
 			HQUIC createStream();
@@ -50,8 +56,6 @@ namespace hope {
 			void tryParse();
 
 			boost::asio::awaitable<void> registrationTimeout();
-
-			void clear();
 
 		private:
 

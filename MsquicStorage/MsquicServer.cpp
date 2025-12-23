@@ -8,6 +8,7 @@
 #include "MsquicManager.h"
 #include "MsquicSocket.h"
 #include "MsQuicApi.h"
+#include "WebRTCSignalSocket.h"
 
 #include "AsioProactors.h"
 #include "ConfigManager.h"
@@ -24,8 +25,11 @@ namespace hope {
 
         const MsQuicVersionSettings versionSettings(supportedVersions, 2);
 
-        MsquicServer::MsquicServer(size_t port, std::string alpn, size_t size)
-            : port(port)
+        MsquicServer::MsquicServer(boost::asio::io_context& ioContext ,size_t msquicStoragePort , size_t webSocketPort , std::string alpn, size_t size)
+            : msquicStoragePort(msquicStoragePort)
+            , webSocketPort(webSocketPort)
+            , ioContext(ioContext)
+            , accept(ioContext, boost::asio::ip::tcp::endpoint(boost::asio::ip::address_v4::any(), webSocketPort))
             , alpn(alpn)
             , size(size)
             , msquicManagers(size)
@@ -47,35 +51,22 @@ namespace hope {
 
         bool MsquicServer::RunEventLoop() {
         
-            // Create listener
-            QUIC_STATUS status = MsQuic->ListenerOpen(
-                *registration,
-                MsquicAcceptHandle,
-                this,
-                &listener);
+            if (!RunMsquicLoop()) {
+            
+                LOG_ERROR("RunMsquicLoop Failed!");
 
-            if (QUIC_FAILED(status)) {
-                LOG_ERROR("initialize failed: ListenerOpen status=0x%08X", status);
                 return false;
+
             }
 
-            // Start listening
-            QUIC_ADDR addr = { 0 };
-            QuicAddrSetFamily(&addr, QUIC_ADDRESS_FAMILY_INET);
-            QuicAddrSetPort(&addr, port);
+            if (!RunWebSocketLoop()) {
 
-            const QUIC_BUFFER alpnBufferList[] = {
-                { (uint32_t)alpn.length(), (uint8_t*)alpn.c_str() }
-            };
+                LOG_ERROR("RunWebSocketLoop Failed!");
 
-            status = MsQuic->ListenerStart(listener, alpnBufferList, 1, &addr);
-
-            if (QUIC_FAILED(status)) {
-                LOG_ERROR("initialize failed: ListenerStart status=0x%08X", status);
                 return false;
+
             }
 
-            LOG_INFO("MsquicServer Protocol: %s Accept Port: %d  initialize SUCCESS", alpn.c_str(), port);
             return true;
 
         }
@@ -226,6 +217,7 @@ namespace hope {
             configuration->SetVersionNegotiationExtEnabled();
 
             initialized = true;
+
             return true;
         }
 
@@ -254,9 +246,7 @@ namespace hope {
             }
 
             if (registration != nullptr) {
-                // RegistrationClose 应该在所有子对象(Conns/Config)关闭后调用
-                // 你的 MsQuicRegistration 包装类析构函数里应该调用了 RegistrationClose
-                delete registration;
+                registration->Shutdown(QUIC_CONNECTION_SHUTDOWN_FLAG_NONE, 0);
                 registration = nullptr;
             }
 
@@ -328,6 +318,77 @@ namespace hope {
         {
             size_t index = loadBalancer.fetch_add(1) % size;
             return msquicManagers[index];
+        }
+
+        bool MsquicServer::RunMsquicLoop()
+        {
+            // Create listener
+            QUIC_STATUS status = MsQuic->ListenerOpen(
+                *registration,
+                MsquicAcceptHandle,
+                this,
+                &listener);
+
+            if (QUIC_FAILED(status)) {
+                LOG_ERROR("initialize failed: ListenerOpen status=0x%08X", status);
+                return false;
+            }
+
+            // Start listening
+            QUIC_ADDR addr = { 0 };
+            QuicAddrSetFamily(&addr, QUIC_ADDRESS_FAMILY_INET);
+            QuicAddrSetPort(&addr, msquicStoragePort);
+
+            const QUIC_BUFFER alpnBufferList[] = {
+                { (uint32_t)alpn.length(), (uint8_t*)alpn.c_str() }
+            };
+
+            status = MsQuic->ListenerStart(listener, alpnBufferList, 1, &addr);
+
+            if (QUIC_FAILED(status)) {
+                LOG_ERROR("initialize failed: ListenerStart status=0x%08X", status);
+                return false;
+            }
+
+            LOG_INFO("MsquicServer Protocol: %s Accept Port: %d", alpn.c_str(), msquicStoragePort);
+        }
+
+        bool MsquicServer::RunWebSocketLoop()
+        {
+            if (runAccepct.load()) return false;
+
+            runAccepct.store(true);
+
+            boost::asio::co_spawn(ioContext, [this]() ->boost::asio::awaitable<void> {
+
+                while (runAccepct.load()) {
+
+                    std::shared_ptr<MsquicManager> manager = loadBalanceMsquicManger();
+
+                    std::shared_ptr<WebRTCSignalSocket> webrtcSignalSocket = std::make_shared<WebRTCSignalSocket>(hope::iocp::AsioProactors::getInstance()->getIoCompletePorts().second, manager.get());
+
+                    co_await accept.async_accept(webrtcSignalSocket->getWebSocket().next_layer(), boost::asio::use_awaitable);
+
+                    webrtcSignalSocket->setOnDisConnectHandle([sharedManager = manager->shared_from_this()](std::string accountId) {
+
+                        sharedManager->removeConnection(accountId);
+
+                        });
+
+                    boost::asio::co_spawn(webrtcSignalSocket->getIoCompletionPorts(), [this, selfWebRTCSignalSocket = webrtcSignalSocket->shared_from_this()]()->boost::asio::awaitable<void> {
+
+                        co_await selfWebRTCSignalSocket->handShake();
+
+                        selfWebRTCSignalSocket->runEventLoop();
+
+                        }, boost::asio::detached);
+
+
+                }
+
+                }, boost::asio::detached);
+
+            return true;
         }
 
         void MsquicServer::postTaskAsync(size_t channelIndex,

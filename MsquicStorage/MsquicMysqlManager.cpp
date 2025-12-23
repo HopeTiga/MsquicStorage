@@ -1,7 +1,8 @@
 #include "MsquicMysqlManager.h"
 #include "AsioProactors.h"
-#include "Logger.h"
 #include <iostream>
+
+#include "Utils.h"
 
 namespace hope {
     namespace mysql {
@@ -42,17 +43,17 @@ namespace hope {
 
                         self->isConnected = true;
 
-                        Logger::getInstance()->info("MySQL connection established successfully");
+                        LOG_DEBUG("MySQL connection established successfully");
 
                         self->startHeartbeat(std::chrono::seconds(300));
                     }
                     catch (const std::exception& e) {
                         self->isConnected = false;
-                        Logger::getInstance()->error(std::string("MySQL Connection failed: ") + e.what());
+                        LOG_ERROR("MySQL Connection failed: %s", e.what());
                     }
                 }
                 else {
-                    Logger::getInstance()->warning("MsquicMysqlManager instance has been destroyed before connection attempt");
+                    LOG_WARNING("MsquicMysqlManager instance has been destroyed before connection attempt");
                 }
                 }, boost::asio::detached);
         }
@@ -65,8 +66,7 @@ namespace hope {
             heartbeatInterval = interval;
             heartbeatRunning = true;
 
-            Logger::getInstance()->info("Starting MySQL heartbeat, interval: " +
-                std::to_string(interval.count()) + " seconds");
+            LOG_DEBUG("Starting MySQL heartbeat, interval: %d seconds", interval.count());
 
             doHeartbeat();
         }
@@ -74,7 +74,7 @@ namespace hope {
         void MsquicMysqlManager::stopHeartbeat() {
             heartbeatRunning = false;
             heartbeatTimer.cancel();
-            Logger::getInstance()->info("MySQL heartbeat stopped");
+            LOG_DEBUG("MySQL heartbeat stopped");
         }
 
         void MsquicMysqlManager::doHeartbeat() {
@@ -103,7 +103,7 @@ namespace hope {
                     // 尝试重连
                     bool success = co_await checkAndReconnect();
                     if (!success) {
-                        Logger::getInstance()->warning("Heartbeat: connection is not available");
+                        LOG_WARNING("Heartbeat: connection is not available");
                         co_return;
                     }
                 }
@@ -112,10 +112,10 @@ namespace hope {
                 boost::mysql::results result;
                 co_await mysqlConnection->async_execute("SELECT 1 AS heartbeat", result);
 
-                Logger::getInstance()->debug("MySQL heartbeat executed successfully");
+                LOG_DEBUG("MySQL heartbeat executed successfully");
             }
             catch (const std::exception& e) {
-                Logger::getInstance()->warning("MySQL heartbeat failed: " + std::string(e.what()));
+                LOG_WARNING("MySQL heartbeat failed: %s", e.what());
                 isConnected = false;
 
                 // 心跳失败后立即尝试重连
@@ -146,11 +146,11 @@ namespace hope {
                 co_await mysqlConnection->async_connect(params);
                 isConnected = true;
 
-                Logger::getInstance()->info("MySQL connection reestablished successfully");
+                LOG_WARNING("MySQL connection reestablished successfully");
                 co_return true;
             }
             catch (const std::exception& e) {
-                Logger::getInstance()->error("MySQL reconnection failed: " + std::string(e.what()));
+                LOG_ERROR("MySQL reconnection failed: %s", e.what());
                 isConnected = false;
                 co_return false;
             }
@@ -159,7 +159,7 @@ namespace hope {
         std::shared_ptr<boost::mysql::any_connection> MsquicMysqlManager::getConnection() {
             // 返回连接前可以检查状态
             if (!isConnected) {
-                Logger::getInstance()->warning("Returning potentially disconnected MySQL connection");
+                LOG_WARNING("Returning potentially disconnected MySQL connection");
             }
             return mysqlConnection;
         }
