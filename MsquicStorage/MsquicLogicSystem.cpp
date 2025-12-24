@@ -146,7 +146,7 @@ namespace hope {
                 // 2. 处理目标未找到 (404)
                 if (!targetSocket) {
                     tbb::concurrent_lru_cache<std::string, int>::handle handles = data->msquicManager->localRouteCache[targetId];
-                    auto self = data->msquicManager;
+                    auto self = data->msquicManager->shared_from_this();
 
                     if (handles.value() == -1) {
                         int mapChannelIndex = data->msquicManager->hasher(targetId) % data->msquicManager->hashSize;
@@ -163,7 +163,7 @@ namespace hope {
                                         std::shared_ptr<hope::quic::MsquicSocketInterface> targetmsquicSocketInterface = manager->msquicSocketInterfaceMap[targetId];
                                         boost::json::object forwardMessage = message;
                                         forwardMessage["state"] = 200;
-                                        forwardMessage["message"] = "MsquicWebTransportServer forward";
+                                        forwardMessage["message"] = "MsquicServer forward";
 
                                         // 构建二进制消息
                                         auto [buffer, size] = buildMessage(forwardMessage, targetmsquicSocketInterface.get());
@@ -176,7 +176,7 @@ namespace hope {
                                         boost::json::object response;
                                         response["requestType"] = requestTypeValue;
                                         response["state"] = 404;
-                                        response["message"] = "targetId is not register";
+                                        response["message"] = "TargetId is not register";
 
                                         // 构建二进制消息
                                         auto [buffer, size] = buildMessage(response, msquicSocketInterface);
@@ -191,7 +191,7 @@ namespace hope {
                                 boost::json::object response;
                                 response["requestType"] = requestTypeValue;
                                 response["state"] = 404;
-                                response["message"] = "targetId is not register";
+                                response["message"] = "TargetId is not register";
 
                                 // 构建二进制消息
                                 auto [buffer, size] = buildMessage(response, msquicSocketInterface);
@@ -211,7 +211,7 @@ namespace hope {
                                 std::shared_ptr<hope::quic::MsquicSocketInterface> targetmsquicSocketInterface = manager->msquicSocketInterfaceMap[targetId];
                                 boost::json::object forwardMessage = message;
                                 forwardMessage["state"] = 200;
-                                forwardMessage["message"] = "msquicServer forward";
+                                forwardMessage["message"] = "MsquicServer forward";
 
                                 // 构建二进制消息
                                 auto [buffer, size] = buildMessage(forwardMessage, targetmsquicSocketInterface.get());
@@ -235,7 +235,7 @@ namespace hope {
                                                 std::shared_ptr<hope::quic::MsquicSocketInterface> targetmsquicSocketInterface = manager->msquicSocketInterfaceMap[targetId];
                                                 boost::json::object forwardMessage = message;
                                                 forwardMessage["state"] = 200;
-                                                forwardMessage["message"] = "msquicServer forward";
+                                                forwardMessage["message"] = "MsquicServer forward";
 
                                                 // 构建二进制消息
                                                 auto [buffer, size] = buildMessage(forwardMessage, targetmsquicSocketInterface.get());
@@ -248,7 +248,7 @@ namespace hope {
                                                 boost::json::object response;
                                                 response["requestType"] = requestTypeValue;
                                                 response["state"] = 404;
-                                                response["message"] = "targetId is not register";
+                                                response["message"] = "TargetId is not register";
 
                                                 // 构建二进制消息
                                                 auto [buffer, size] = buildMessage(response, msquicSocketInterface);
@@ -263,7 +263,7 @@ namespace hope {
                                         boost::json::object response;
                                         response["requestType"] = requestTypeValue;
                                         response["state"] = 404;
-                                        response["message"] = "targetId is not register";
+                                        response["message"] = "TargetId is not register";
 
                                         // 构建二进制消息
                                         auto [buffer, size] = buildMessage(response, msquicSocketInterface);
@@ -281,8 +281,10 @@ namespace hope {
 
                 // 3. 转发消息
                 boost::json::object forwardMessage = message;
+
                 forwardMessage["state"] = 200;
-                forwardMessage["message"] = "MsquicWebTransportServer forward";
+
+                forwardMessage["message"] = "MsquicServer forward";
 
                 // 构建二进制消息
                 auto [buffer, size] = buildMessage(forwardMessage, targetSocket.get());
@@ -386,7 +388,7 @@ namespace hope {
 
                 int mapChannelIndex = data->msquicManager->hasher(accountId) % data->msquicManager->hashSize;
 
-                data->msquicManager->msquicServer->postTaskAsync(mapChannelIndex, [self = data->msquicManager, accountId, mapChannelIndex](std::shared_ptr<hope::quic::MsquicManager> manager)->boost::asio::awaitable<void> {
+                data->msquicManager->msquicServer->postTaskAsync(mapChannelIndex, [self = data->msquicManager->shared_from_this(), accountId, mapChannelIndex](std::shared_ptr<hope::quic::MsquicManager> manager)->boost::asio::awaitable<void> {
                     manager->actorSocketMappingIndex[accountId] = self->channelIndex;
                     co_return;
                     });

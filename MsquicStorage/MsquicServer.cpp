@@ -502,9 +502,15 @@ namespace hope {
 
                     msquicSocket->shutDown();
 
-                    boost::asio::co_spawn(msquicSocket->getIoCompletionPorts(), [=]()mutable->boost::asio::awaitable<void> {
+                    boost::asio::co_spawn(msquicSocket->getIoCompletionPorts(), [self = msquicSocket->weak_from_this()]()mutable->boost::asio::awaitable<void> {
                         
-                        msquicSocket->getMsquicManager()->removeConnection(msquicSocket->getAccountId());
+                        std::shared_ptr<hope::quic::MsquicSocket> msquicSocket = self.lock();
+
+                        if (msquicSocket) {
+                        
+                            msquicSocket->getMsquicManager()->removeConnection(msquicSocket->getAccountId());
+
+                        }
 
                         co_return;
 
