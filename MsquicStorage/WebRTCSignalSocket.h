@@ -66,6 +66,7 @@ namespace hope {
 
 			boost::asio::awaitable<void> writerCoroutine();
 
+			void setTcpKeepAlive(boost::asio::ip::tcp::socket& socket,int idle = 5, int intvl = 5, int probes = 2);
 
 		private:
 

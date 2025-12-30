@@ -68,6 +68,9 @@ namespace hope {
 
                 // 3. 执行 WebSocket 服务端握手 (async_accept)
                 co_await webSocket.async_accept(req, boost::asio::use_awaitable);
+
+                setTcpKeepAlive(webSocket.next_layer());
+
                 boost::asio::co_spawn(ioContext, [self = shared_from_this()]() -> boost::asio::awaitable<void> {
                     co_await self->registrationTimeout();
                     }, boost::asio::detached);
@@ -79,6 +82,42 @@ namespace hope {
                 // ... 错误处理 ...
                 destroy();
             }
+        }
+
+        void WebRTCSignalSocket::setTcpKeepAlive(boost::asio::ip::tcp::socket& sock, int idle, int intvl, int probes)
+        {
+            int fd = sock.native_handle();
+
+            /* 1. 先打开 SO_KEEPALIVE 通用开关 */
+            int on = 1;
+            setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE,
+                reinterpret_cast<const char*>(&on), sizeof(on));
+
+#if defined(__linux__)
+            setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+            setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
+            setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &probes, sizeof(probes));
+
+#elif defined(_WIN32)
+            /* Windows 用毫秒结构体 */
+            struct tcp_keepalive kalive {};
+            kalive.onoff = 1;
+            kalive.keepalivetime = idle * 1000;   // ms
+            kalive.keepaliveinterval = intvl * 1000;   // ms
+            DWORD bytes_returned = 0;
+            WSAIoctl(fd, SIO_KEEPALIVE_VALS,
+                &kalive, sizeof(kalive),
+                nullptr, 0, &bytes_returned, nullptr, nullptr);
+
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+            /* macOS / BSD 用秒级 TCP_KEEPALIVE 等选项 */
+            setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &idle, sizeof(idle));   // 同 Linux 的 IDLE
+            /* 间隔与次数在 BSD 上只有一个 TCP_KEEPINTVL，单位秒 */
+            setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
+            /* BSD 没有 KEEPCNT，用 TCP_KEEPALIVE 的初始值+间隔推算，效果相近 */
+#else
+#warning "Unsupported platform, TCP keep-alive parameters not tuned"
+#endif
         }
 
         // WebRTCSignalSocket.cpp
