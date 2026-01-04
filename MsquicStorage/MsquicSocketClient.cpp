@@ -20,41 +20,17 @@ namespace hope {
             clear();
         }
 
-        bool MsquicSocketClient::initialize( const std::string& alpn) {
+        bool MsquicSocketClient::initialize(const std::string& alpn) {
+
             if (MsQuic == nullptr) {
+
                 return false;
+
             }
 
             this->alpn = alpn;
 
-            // 创建注册
-            registration = new MsQuicRegistration("MsquicSocketClient");
-            if (!registration->IsValid()) {
-                return false;
-            }
-
-            // 配置设置
-            MsQuicSettings settings;
-            settings.SetIdleTimeoutMs(10000);
-            settings.SetKeepAlive(5000);
-            settings.SetPeerBidiStreamCount(2);
-
-            // 创建ALPN
-            MsQuicAlpn alpnBuffer(alpn.c_str());
-
-            // 创建配置
-            QUIC_CREDENTIAL_CONFIG credConfig = { 0 };
-            credConfig.Type = QUIC_CREDENTIAL_TYPE_NONE;
-            credConfig.Flags = QUIC_CREDENTIAL_FLAG_CLIENT | QUIC_CREDENTIAL_FLAG_NO_CERTIFICATE_VALIDATION;
-
-            configuration = new MsQuicConfiguration(
-                *registration,
-                alpnBuffer,
-                settings,
-                MsQuicCredentialConfig(credConfig)
-            );
-
-            return configuration->IsValid();
+            return true;
         }
 
         bool MsquicSocketClient::connect(std::string serverAddress, uint64_t serverPort) {
@@ -62,39 +38,57 @@ namespace hope {
             if (connection != nullptr) {
                 LOG_INFO("reclear msquic connection");
 
-                // 立即标记断开，防止新操作
-                connected.store(false);
+                disconnect();
 
-                // 清理流
-                if (stream) {
-                    MsQuic->StreamShutdown(stream,
-                                           QUIC_STREAM_SHUTDOWN_FLAG_ABORT_SEND |
-                                               QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE,
-                                           QUIC_STATUS_ABORTED);
-                    MsQuic->StreamClose(stream);
-                    stream = nullptr;
+            }
+
+            if (!registration) {
+
+                registration = new MsQuicRegistration("MsquicSocketClient");
+
+                if (!registration->IsValid()) {
+
+                    return false;
+
                 }
 
-                if (remoteStream) {
-                    MsQuic->StreamShutdown(remoteStream,
-                                           QUIC_STREAM_SHUTDOWN_FLAG_ABORT_SEND |
-                                               QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE,
-                                           QUIC_STATUS_ABORTED);
-                    MsQuic->StreamClose(remoteStream);
-                    remoteStream = nullptr;
+                // 创建注册
+                registration = new MsQuicRegistration("MsquicSocketClient");
+                if (!registration->IsValid()) {
+                    return false;
                 }
 
-                // 清理连接
-                MsQuic->ConnectionShutdown(
-                    connection,
-                    QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT,
-                    QUIC_STATUS_ABORTED
-                    );
-                MsQuic->ConnectionClose(connection);
-                connection = nullptr;
+                // 配置设置
+                MsQuicSettings settings;
 
-                // 清空缓冲区
-                receivedBuffer.clear();
+                settings.SetIdleTimeoutMs(10000);
+
+                settings.SetKeepAlive(5000);
+
+                settings.SetPeerBidiStreamCount(2);
+
+                // 创建ALPN
+                MsQuicAlpn alpnBuffer(alpn.c_str());
+
+                // 创建配置
+                QUIC_CREDENTIAL_CONFIG credConfig = { 0 };
+                credConfig.Type = QUIC_CREDENTIAL_TYPE_NONE;
+                credConfig.Flags = QUIC_CREDENTIAL_FLAG_CLIENT | QUIC_CREDENTIAL_FLAG_NO_CERTIFICATE_VALIDATION;
+
+                configuration = new MsQuicConfiguration(
+                    *registration,
+                    alpnBuffer,
+                    settings,
+                    MsQuicCredentialConfig(credConfig)
+                );
+
+                if (!configuration->IsValid()) {
+
+                    LOG_ERROR("MsQuicConfiguration Init Error");
+
+                    return false;
+                }
+
             }
 
             this->serverAddress = serverAddress;
@@ -195,7 +189,7 @@ namespace hope {
             int64_t bodyLength = static_cast<int64_t>(body.size());
             size_t totalSize = sizeof(int64_t) + bodyLength;
 
-            unsigned char * buffer = new unsigned char[totalSize];
+            unsigned char* buffer = new unsigned char[totalSize];
 
             // 写入length
             *reinterpret_cast<int64_t*>(buffer) = bodyLength;
@@ -216,37 +210,59 @@ namespace hope {
             // 立即标记逻辑断开，阻止新的写入
             connected.store(false);
 
-            // 1. 关闭流
+            if (registration) {
+
+                registration->Shutdown(QUIC_CONNECTION_SHUTDOWN_FLAG_NONE, 0);
+
+                registration = nullptr;
+
+            }
+
+            if (configuration) {
+
+                delete configuration;
+
+                configuration = nullptr;
+
+            }
+
             if (stream) {
-                // 先优雅关闭，再关闭
+                // 使用中止标志立即关闭
                 MsQuic->StreamShutdown(stream,
-                                       QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL,
-                                       0);
+                    QUIC_STREAM_SHUTDOWN_FLAG_ABORT_SEND |
+                    QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE,
+                    QUIC_STATUS_SUCCESS);
+
                 MsQuic->StreamClose(stream);
+
                 stream = nullptr;
             }
 
             if (remoteStream) {
+
                 MsQuic->StreamShutdown(remoteStream,
-                                       QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL,
-                                       0);
+                    QUIC_STREAM_SHUTDOWN_FLAG_ABORT_SEND |
+                    QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE,
+                    QUIC_STATUS_SUCCESS);
+
                 MsQuic->StreamClose(remoteStream);
+
                 remoteStream = nullptr;
             }
 
-            // 2. 优雅关闭连接
             if (connection) {
 
-                // 使用异步关闭，等待 SHUTDOWN_COMPLETE 回调
                 MsQuic->ConnectionShutdown(
                     connection,
-                    QUIC_CONNECTION_SHUTDOWN_FLAG_NONE,
+                    QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT,
                     QUIC_STATUS_SUCCESS
-                    );
+                );
+
+                MsQuic->ConnectionClose(connection);
 
                 connection = nullptr;
-
             }
+
         }
 
         void MsquicSocketClient::setOnDataReceivedHandle(std::function<void(boost::json::object&)> handle) {
@@ -282,7 +298,7 @@ namespace hope {
 
                         try {
                             auto json = boost::json::parse(jsonStr).as_object();
-          
+
                             if (onDataReceivedHandle) {
 
                                 onDataReceivedHandle(json);
@@ -353,9 +369,9 @@ namespace hope {
 
                         try {
                             auto json = boost::json::parse(jsonStr).as_object();
-                 
+
                             if (onDataReceivedHandle) {
-                            
+
                                 onDataReceivedHandle(json);
 
                             }
@@ -441,15 +457,18 @@ namespace hope {
                     onDataReceivedHandle(json);
 
                 }
-  
+
             }
         }
 
         void MsquicSocketClient::clear() {
 
+            if (!connected.load()) return;
+
             onConnectionHandle = nullptr;
 
             onDataReceivedHandle = nullptr;
+
             // 先标记断开，防止新操作
             connected.store(false);
 
@@ -465,18 +484,18 @@ namespace hope {
             if (stream) {
                 // 使用中止标志立即关闭
                 MsQuic->StreamShutdown(stream,
-                                       QUIC_STREAM_SHUTDOWN_FLAG_ABORT_SEND |
-                                           QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE,
-                                       QUIC_STATUS_ABORTED);
+                    QUIC_STREAM_SHUTDOWN_FLAG_ABORT_SEND |
+                    QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE,
+                    QUIC_STATUS_ABORTED);
                 MsQuic->StreamClose(stream);
                 stream = nullptr;
             }
 
             if (remoteStream) {
                 MsQuic->StreamShutdown(remoteStream,
-                                       QUIC_STREAM_SHUTDOWN_FLAG_ABORT_SEND |
-                                           QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE,
-                                       QUIC_STATUS_ABORTED);
+                    QUIC_STREAM_SHUTDOWN_FLAG_ABORT_SEND |
+                    QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE,
+                    QUIC_STATUS_ABORTED);
                 MsQuic->StreamClose(remoteStream);
                 remoteStream = nullptr;
             }
@@ -488,7 +507,7 @@ namespace hope {
                     connection,
                     QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT,
                     QUIC_STATUS_ABORTED
-                    );
+                );
 
                 MsQuic->ConnectionClose(connection);
 
